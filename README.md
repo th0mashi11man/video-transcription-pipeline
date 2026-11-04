@@ -1,210 +1,120 @@
-# Universal Video-to-Text Transcription & Speaker Diarization Pipeline
+# Transcript Studio
 
-A production-ready pipeline for transcribing video or audio files into structured text using **FFmpeg**, **Qwen3-ASR-1.7B** (`QwenLM/Qwen3-ASR`), **Qwen3-ForcedAligner-0.6B** for word-level timestamps, and **PyAnnote Speaker Diarization**.
+A local Tauri desktop app for producing and reviewing transcripts beside their audio or video. Built on [misc-an/video-transcription-pipeline](https://github.com/misc-an/video-transcription-pipeline), with Whisper transcription and PyAnnote speaker detection.
 
----
+## What works in this first version
 
-## Repository Layout
+- Open a local recording and generate a transcript with word timestamps, ASR word probabilities, and speaker labels.
+- Play audio or video alongside the transcript. Click a word to seek to its timestamp.
+- Replay a selected word with one second of surrounding context, loop that section, and change playback speed.
+- Highlight low-confidence words using an adjustable threshold. Missing scores are shown separately and included in review.
+- Search passages, filter to passages needing review, and jump to the next issue.
+- Edit words or untimed passages; mark words or whole passages reviewed. Preserve the original wording, timing, and model score.
+- Save and reopen JSON projects; export corrected TXT, SRT, and VTT.
+- Connect Hugging Face through guided setup and store the token in the operating system credential vault (Keychain on macOS).
+- Run and cancel transcription in the background, with an activity log and actionable failures.
 
-```
-speech-to-text_interview/
-├── README.md                          # Project documentation & usage guide
-├── pyproject.toml                     # Python project configuration (uv / pip)
-├── requirements.txt                   # Locked dependencies specification
-├── uv.lock                            # Deterministic package resolution lockfile
-├── .gitignore                         # Git exclusion rules (ignores media, venv, caches)
-│
-├── scripts/                           # Runnable shell and Python scripts
-│   ├── setup_env.sh                   # One-click environment bootstrap script
-│   ├── transcribe_pipeline.py         # Standalone transcription pipeline runner
-│   └── download_weights.py            # Standalone weights pre-download runner
-│
-├── src/                               # Modular Python source package
-│   └── video_transcription/
-│       ├── __init__.py                # Package exports
-│       ├── pipeline.py                # Core transcription & diarization orchestrator
-│       ├── audio.py                   # Universal FFmpeg media extraction
-│       ├── export.py                  # Formatters: TXT, SRT, VTT, JSON
-│       └── weights.py                 # Weight pre-caching utilities
-│
-├── tests/                             # Automated test suite
-│   └── test_pipeline.py               # Unit tests for formatters, alignment, diarization
-│
-├── data/
-│   ├── input/                         # Local media inputs (ignored by git)
-│   └── output/                        # Default output destination (ignored by git)
-│
-└── examples/                          # Sample outputs from verified run
-    ├── Carl Sagan's 1994 "Lost" Lecture...txt
-    ├── Carl Sagan's 1994 "Lost" Lecture...srt
-    ├── Carl Sagan's 1994 "Lost" Lecture...vtt
-    └── Carl Sagan's 1994 "Lost" Lecture...json
-```
+## Run locally
 
----
+Requirements: Node.js 22.12+, Rust, Python 3.12 via [uv](https://docs.astral.sh/uv/), FFmpeg, and the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/). macOS needs Xcode Command Line Tools.
 
-## Architecture & Features
+From the repository root:
 
-1. **Qwen3-ASR-1.7B Speech Recognition**:
-   - High-accuracy speech-to-text across 52 languages and dialects.
-   - Accelerated natively on Apple Silicon Mac (`mps` via Metal Performance Shaders) with `torch.float16`, on CUDA with `torch.bfloat16`, and on CPU with `torch.float32`.
-
-2. **Qwen3-ForcedAligner-0.6B Timestamp Alignment**:
-   - Non-autoregressive forced alignment engine providing word- and token-level start and end timestamps.
-
-3. **PyAnnote Speaker Diarization**:
-   - Cascaded speaker clustering (`pyannote/speaker-diarization-community-1`) assigns speaker turn labels (`SPEAKER_00`, `SPEAKER_01`, etc.) to aligned words and dialogue segments.
-
-4. **Robust Multi-Format Subtitle & Transcript Exporter**:
-   - Exports `.txt`, `.srt`, `.vtt`, and `.json`.
-   - Includes millisecond roll-over protection (prevents 4-digit milliseconds like `00:00:01,1000`).
-   - Supports safe handling of missing timestamps and filenames containing dots.
-
----
-
-## Quick Start
-
-### 1. Environment Setup
-
-Run the bootstrap script from anywhere:
 ```bash
-chmod +x scripts/setup_env.sh
-./scripts/setup_env.sh
+uv sync --python 3.12 --extra speakers --extra dev
+cd desktop
+npm ci
+npm run tauri dev
 ```
 
-Or manually using `uv`:
+The app automatically uses the repository's `.venv`. A different Python executable can be selected in Settings. A Python environment with the project's dependencies and an FFmpeg executable are currently required separately; this is a development MVP, not a self-contained installer. The Python source is included in packaged app resources.
+
+For a browser-only preview:
+
 ```bash
-uv venv --python 3.12 .venv
-uv pip install -r requirements.txt
-uv pip install -e .
+cd desktop
+npm run dev
 ```
 
-### 2. Activating the Virtual Environment
+Open the displayed local address. The browser preview supports media playback, JSON import, editing, sample exploration, and export. Transcription and secure token storage require the Tauri desktop app.
 
-Activate the `.venv` environment in your shell:
+Build a macOS app:
 
-**macOS / Linux (Bash/Zsh):**
 ```bash
-source .venv/bin/activate
+cd desktop
+npm run tauri build
 ```
 
-**Windows (PowerShell):**
-```powershell
-.venv\Scripts\Activate.ps1
-```
+The app is written to `desktop/src-tauri/target/release/bundle/macos/Transcript Studio.app`. Distribution signing and notarization are not configured. Windows/Linux targets need their respective platform prerequisites and bundle target configuration; only macOS has been checked here.
 
-**Windows (Command Prompt):**
-```cmd
-.venv\Scripts\activate.bat
-```
+## Connect Hugging Face and identify speakers
 
-> **Tip**: Once activated, your shell prompt will show `(.venv)`. You can then run any command directly (e.g. `transcribe`, `download-weights`, or `pytest`) without prefixing with `uv run`.
-> To exit the environment at any time:
-> ```bash
-> deactivate
-> ```
+Speaker detection is enabled by default. In the app, open Settings → Connect Hugging Face:
 
-### 3. Pre-download Weights (Standard Cache)
+1. Follow **Create a read token**, sign in or create a free account, and create a token with **Read** access.
+2. Follow the links to accept the user conditions for [speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1) and [segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0), using the same account.
+3. Paste the token into the password field and choose **Save token**.
+4. Open a recording and choose **Transcribe recording**.
 
-Pre-load `Qwen/Qwen3-ASR-1.7B` and `Qwen/Qwen3-ForcedAligner-0.6B` directly into `~/.cache/huggingface/hub/`:
+The token is stored in the OS credential vault and passed to the Python child process through its environment, not command-line arguments or project JSON. The UI never reads the saved value back. Removing it deletes the app's credential entry. “Token added” means it was stored; access to the gated models is verified during transcription. An invalid token or missing agreement produces an error with setup instructions. Speaker detection failures are not silently ignored. You may explicitly disable speaker detection to transcribe without it.
+
+The initial model download requires internet access. Transcription and speaker inference run locally. PyAnnote telemetry is disabled for jobs started by the app. Model downloads may be substantial; choose Tiny or Base for a quick first test. On Apple Silicon, Whisper uses CPU/int8 because CTranslate2 does not support Metal; PyAnnote can use Metal. Speaker IDs are anonymous labels, not identified people.
+
+## Review and save
+
+1. Attach the original recording and transcribe it, or open an existing pipeline JSON file.
+2. Use **Needs review** or **Next issue** to find low-score or unscored words.
+3. Select a word and use **Replay context**. Enable **Loop** to listen repeatedly.
+4. Type a correction and choose **Save correction**, or mark a complete passage reviewed.
+5. Choose **Save project** to save JSON, including corrections and review decisions.
+
+JSON does not embed the recording. Reattach its original file after reopening a project. Changes are saved explicitly; the app prompts before replacing or closing unsaved work. Exporting text or subtitles does not save review metadata.
+
+Confidence is an uncalibrated ASR estimate: a high score can still be wrong, and a low score can be right. Corrections keep the original score instead of inventing a new certainty. Imported older WhisperX `score` fields are alignment scores rather than ASR probabilities; they are retained for review, but should not be compared as calibrated probabilities. Legacy Qwen output has timestamps but no scores and is shown as confidence unavailable. Untimed passages can be edited, but subtitle export requires valid start/end times. Multiword replacements retain the original selected word's timing; they do not perform realignment.
+
+Playback uses the system webview's codecs. MP4 with H.264/AAC and WAV/MP3 are practical choices on macOS; FFmpeg can transcribe additional formats that the player may not support. Playback failures are reported explicitly.
+
+## Command-line pipeline
+
 ```bash
-uv run download-weights
-# or: python scripts/download_weights.py
+uv run --extra speakers transcribe recording.mp4 --output-dir data/output
+# No speaker detection or Hugging Face account:
+uv run transcribe recording.mp4 --no-diarize --model small
+# Download models in advance (HF_TOKEN is needed for --speakers):
+uv run --extra speakers download-weights --model small --speakers
 ```
 
-To pre-cache PyAnnote Speaker Diarization models (requires Hugging Face token):
+For command-line speaker detection, use the `HF_TOKEN` environment variable or an existing Hugging Face login. Options include `--language sv`, `--device cpu|cuda`, `--compute-type`, `--min-speakers`, `--max-speakers`, `--start-time`, `--duration`, and `--cleanup-audio`. Output includes TXT, SRT, VTT, and JSON. Word times for clipped CLI runs are offset to the original recording.
+
+The desktop app writes intermediate job results and activity logs in its local application-data directory under `jobs/`. Your source recording is not modified. Temporary extracted audio is removed after completion or an ordinary error; a forcefully cancelled process may leave its temporary directory behind. Project JSON is written only to the location you select.
+
+## Repository findings and implementation choices
+
+The upstream checkout was examined at `12489f1`. It is a small Python CLI with reusable FFmpeg extraction, word grouping, speaker assignment, and TXT/SRT/VTT/JSON exporters, plus example transcripts and six tests. Its latest change replaced WhisperX with Qwen3-ASR. The earlier WhisperX version at `e9dd20b` already used CTranslate2 on CPU/CUDA and PyAnnote on CPU/Metal/CUDA.
+
+The current fork uses Faster Whisper directly so timestamps and ASR word probabilities come from the same decoder. PyAnnote speaker turns are assigned by temporal overlap using the upstream helper, then grouped into passages. This avoids presenting a forced-alignment score as transcription certainty. Qwen dependencies and model download paths were removed. The existing example files remain importable.
+
+```text
+desktop/                      React + TypeScript review interface
+  src/transcript.ts           Import, review metadata, and corrected export
+  src-tauri/                  Tauri native commands, credential vault, job runner
+src/video_transcription/
+  whisper.py                  Faster Whisper + PyAnnote orchestration
+  pipeline.py                 Shared grouping and speaker assignment
+  audio.py                    FFmpeg extraction
+  export.py                   TXT/SRT/VTT/JSON exporters
+  weights.py                  Model pre-download helpers
+tests/                        Python regression and backend contract tests
+```
+
+## Checks
+
 ```bash
-uv run download-weights --hf-token "your_hf_token_here"
+uv run --extra dev pytest tests -q
+cd desktop
+npm test
+npm run build
+cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
----
-
-## Running the Transcription Pipeline
-
-### Basic Usage (Full Video)
-```bash
-# Using the installed CLI:
-transcribe "data/input/video.webm"
-
-# Or using uv run:
-uv run transcribe "data/input/video.webm"
-
-# Or using the script directly:
-python scripts/transcribe_pipeline.py "data/input/video.webm"
-```
-
-### Quick Test Snippet (e.g., first 30 seconds)
-```bash
-transcribe "data/input/video.webm" --duration 30
-```
-
-### Specifying Output Directory
-```bash
-transcribe "data/input/video.webm" --output-dir "data/output"
-```
-
-### With Speaker Diarization
-To identify and label speakers (`SPEAKER_00`, `SPEAKER_01`, etc.):
-```bash
-export HF_TOKEN="hf_xxxxxxxxxxxxxxxxxxxx"
-transcribe "data/input/video.webm" --diarize
-```
-Or pass the token directly:
-```bash
-transcribe "data/input/video.webm" --diarize --hf-token "hf_xxxxxxxxxxxxxxxxxxxx"
-```
-
-> **Note for Diarization**: Ensure you have accepted user conditions on:
-> - [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1)
-> - [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0)
-
-### Universal Format Support
-Accepts any video container and codec:
-- Video: `.webm`, `.mp4`, `.mkv`, `.mov`, `.avi`, `.flv`, `.wmv`, `.m4v`, `.ts`
-- Audio: `.mp3`, `.m4a`, `.aac`, `.flac`, `.wav`, `.ogg`, `.opus`
-
-FFmpeg extracts audio stream into a normalized 16kHz 16-bit mono PCM WAV for maximum ASR accuracy.
-
----
-
-## Generated Outputs
-
-For an input file named `lecture.webm`, the following files are produced:
-
-| Output File | Description |
-|---|---|
-| `lecture.txt` | Clean plain-text transcript with timestamps and speaker labels. |
-| `lecture.srt` | Standard SubRip subtitle file for video players (VLC, YouTube, etc.). |
-| `lecture.vtt` | WebVTT caption file formatted with speaker voice tags (`<v SPEAKER_00>`). |
-| `lecture.json` | Complete structured JSON containing word-level timestamps, confidence scores, and speaker IDs. |
-| `lecture.extracted.wav` | Extracted 16kHz mono audio (pass `--cleanup-audio` to remove). |
-
----
-
-## Running Automated Tests
-
-Run the test suite using `pytest`:
-```bash
-uv run pytest tests/
-```
-
----
-
-## CLI Options
-
-| Argument | Description | Default |
-|---|---|---|
-| `media_file` | Path to video or audio file | *(Required)* |
-| `-o`, `--output-dir` | Target output directory | Input file directory |
-| `--model` | Qwen ASR model repository ID | `Qwen/Qwen3-ASR-1.7B` |
-| `--aligner-model` | Qwen Forced Aligner model repository ID | `Qwen/Qwen3-ForcedAligner-0.6B` |
-| `-l`, `--language` | Language (e.g. `English`, `Chinese`, or code `en`, `zh`). Auto-detected if omitted. | Auto-detect |
-| `--device` | Inference device (`mps`, `cuda`, `cpu`) | Auto-detect (`mps` on Mac) |
-| `--no-align` | Skip word-level forced alignment | Alignment enabled |
-| `--diarize` | Enable PyAnnote Speaker Diarization | Disabled |
-| `--hf-token` | Hugging Face token for diarization | `$HF_TOKEN` env var |
-| `--min-speakers` | Minimum number of speakers | Auto |
-| `--max-speakers` | Maximum number of speakers | Auto |
-| `--start-time` | Start offset in seconds or `HH:MM:SS` | `0` |
-| `--duration` | Process only first N seconds | Full file |
-| `--cleanup-audio` | Delete intermediate WAV after transcription | Keep WAV |
+Tests cover transcript import, missing confidence/timestamps, edit persistence, subtitle export, source-file protection, confidence propagation, clipping offsets, and explicit/redacted speaker-detection failures. Real gated speaker-model inference requires the user's authorized Hugging Face account and model agreements.

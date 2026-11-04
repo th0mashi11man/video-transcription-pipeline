@@ -29,13 +29,9 @@ else
     echo "Found ffmpeg at: $(command -v ffmpeg)"
 fi
 
-# Create virtual environment with Python 3.12 (optimal for PyTorch + Qwen3-ASR on macOS)
-echo "Creating virtual environment .venv with Python 3.12..."
-uv venv --python 3.12 .venv
-
-echo "Installing all dependencies into .venv using uv..."
-uv pip install -r requirements.txt
-uv pip install -e .
+# Install a reproducible Python 3.12 environment, including speaker detection.
+echo "Installing Whisper and PyAnnote into .venv with Python 3.12..."
+uv sync --python 3.12 --extra speakers --extra dev
 
 # Link package directory directly to site-packages (bypasses macOS UF_HIDDEN .pth issue completely)
 SITE_PACKAGES=$(.venv/bin/python3 -c "import site; print(site.getsitepackages()[0])" 2>/dev/null || true)

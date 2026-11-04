@@ -1,22 +1,17 @@
 [project]
 name = "video-transcription-pipeline"
-version = "0.2.0"
-description = "Universal video-to-audio-to-text transcription pipeline using FFmpeg, Qwen3-ASR 1.7B, and PyAnnote Speaker Diarization"
+version = "0.3.0"
+description = "Local Whisper transcription with word confidence, PyAnnote speaker detection, and a Tauri review app"
 readme = "README.md"
 requires-python = ">=3.11, <3.13"
 dependencies = [
-    "qwen-asr>=0.0.6",
-    "accelerate>=1.0.0",
-    "soundfile>=0.14.0",
-    "librosa>=0.10.0",
-    "pyannote-audio>=3.1.0",
-    "torch>=2.2.0",
-    "torchaudio>=2.2.0",
-    "huggingface-hub>=0.20.0",
+    "faster-whisper>=1.2.0,<2",
     "tqdm>=4.66.0",
-    "ffmpeg-python>=0.2.0",
-    "pytest>=8.0.0",
 ]
+
+[project.optional-dependencies]
+speakers = ["pyannote-audio>=4.0,<5", "torch>=2.8,<3", "torchaudio>=2.8,<3"]
+dev = ["pytest>=8.0.0"]
 
 [build-system]
 requires = ["hatchling"]

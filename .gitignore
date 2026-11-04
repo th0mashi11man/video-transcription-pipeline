@@ -63,3 +63,19 @@ Thumbs.db
 # Testing & Tool Caches
 .pytest_cache/
 .ruff_cache/
+
+# Desktop app and local review artifacts
+desktop/node_modules/
+desktop/dist/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+output/
+*.reviewed.json
+*.reviewed.txt
+*.reviewed.srt
+*.reviewed.vtt
+
+.playwright-cli/
+
+# TypeScript sources are not MPEG transport-stream media.
+!desktop/**/*.ts
