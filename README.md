@@ -2,10 +2,11 @@
 
 A local Tauri desktop app for producing and reviewing transcripts beside their audio or video. Built on [misc-an/video-transcription-pipeline](https://github.com/misc-an/video-transcription-pipeline), with Whisper transcription and PyAnnote speaker detection.
 
-## What works in this first version
+## What works
 
 - Open a local recording and generate a transcript with word timestamps, ASR word probabilities, and speaker labels.
-- Play audio or video alongside the transcript. Click a word to seek to its timestamp.
+- A dark editing studio keeps the recording, transcript, and correction inspector visible together. Click a word to seek to its timestamp.
+- Custom playback controls support play/pause, three-second jumps, seeking, muting, and playback speed. Space plays/pauses; Option/Alt + Right moves to the next issue; Command/Ctrl + S saves the project.
 - Replay a selected word with one second of surrounding context, loop that section, and change playback speed.
 - Highlight low-confidence words using an adjustable threshold. Missing scores are shown separately and included in review.
 - Search passages, filter to passages needing review, and jump to the next issue.
@@ -27,7 +28,7 @@ npm ci
 npm run tauri dev
 ```
 
-The app automatically uses the repository's `.venv`. A different Python executable can be selected in Settings. A Python environment with the project's dependencies and an FFmpeg executable are currently required separately; this is a development MVP, not a self-contained installer. The Python source is included in packaged app resources.
+The app automatically uses the repository's `.venv`. A different Python executable can be selected in Settings. Standard source builds use the project environment. The private build described below includes the Python runtime, its dependencies, and an FFmpeg decoder, so recipients do not need to install those separately. The Python source is included in packaged app resources.
 
 For a browser-only preview:
 
@@ -49,24 +50,45 @@ The app is written to `desktop/src-tauri/target/release/bundle/macos/Transcript 
 
 ## Connect Hugging Face and identify speakers
 
-Speaker detection is enabled by default. In the app, open Settings → Connect Hugging Face:
+Speaker detection is enabled by default. Standard builds use a saved credential automatically; private builds use their included credential. To configure a standard build, open Settings → Speaker credential:
 
-1. Follow **Create a read token**, sign in or create a free account, and create a token with **Read** access.
+1. Expand **Speaker credential** in Settings and follow **Create token**, sign in or create a free account, and create a token with **Read** access.
 2. Follow the links to accept the user conditions for [speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1) and [segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0), using the same account.
-3. Paste the token into the password field and choose **Save token**.
+3. Paste the token into the password field and choose **Save securely**.
 4. Open a recording and choose **Transcribe recording**.
 
-The token is stored in the OS credential vault and passed to the Python child process through its environment, not command-line arguments or project JSON. The UI never reads the saved value back. Removing it deletes the app's credential entry. “Token added” means it was stored; access to the gated models is verified during transcription. An invalid token or missing agreement produces an error with setup instructions. Speaker detection failures are not silently ignored. You may explicitly disable speaker detection to transcribe without it.
+For standard builds, the token is stored in the OS credential vault and passed to the Python child process through its environment, not command-line arguments or project JSON. The UI never reads the saved value back. Removing it deletes the app's credential entry. “Token added” means it was stored; access to the gated models is verified during transcription. An invalid token or missing agreement produces an error with setup instructions. Speaker detection failures are not silently ignored. You may explicitly disable speaker detection to transcribe without it.
 
 The initial model download requires internet access. Transcription and speaker inference run locally. PyAnnote telemetry is disabled for jobs started by the app. Model downloads may be substantial; choose Tiny or Base for a quick first test. On Apple Silicon, Whisper uses CPU/int8 because CTranslate2 does not support Metal; PyAnnote can use Metal. Speaker IDs are anonymous labels, not identified people.
+
+## Private builds for a small group
+
+A private build includes the saved read token in its app resources. Recipients can identify speakers without creating an account or pasting credentials. It also includes a relocatable Python runtime, installed dependencies, and an audio decoder. First use still downloads model weights over the internet. The current build targets Apple Silicon macOS; signing and notarization are not configured.
+
+```bash
+cd desktop
+npm run build:private -- --debug
+```
+
+The packaging script reads the app's Keychain entry on macOS. For another build environment, provide `TRANSCRIPT_STUDIO_HF_TOKEN` through a secret manager rather than a shell command containing the token. The script temporarily generates `desktop/src-tauri/.private/huggingface-token`, copies it into the app, and deletes that temporary file afterward. The runtime staging directory stays ignored so subsequent builds can reuse it.
+
+The private resource configuration contains paths only. Standard `npm run tauri build` does not include the private resource. Private bundles and installers must not be committed or uploaded to GitHub. A person with the private app can extract its included token, so share that artifact only with its intended recipients.
+
+Before publishing source changes:
+
+```bash
+python3 scripts/check_secrets.py
+```
+
+The same check runs on pushes and pull requests. It rejects recognizable Hugging Face tokens and private build material in tracked files, reporting only file names.
 
 ## Review and save
 
 1. Attach the original recording and transcribe it, or open an existing pipeline JSON file.
 2. Use **Needs review** or **Next issue** to find low-score or unscored words.
-3. Select a word and use **Replay context**. Enable **Loop** to listen repeatedly.
+3. Select a word and use **Replay context** in the right-hand inspector. Enable **Loop this section** to listen repeatedly.
 4. Type a correction and choose **Save correction**, or mark a complete passage reviewed.
-5. Choose **Save project** to save JSON, including corrections and review decisions.
+5. Choose **Save** (Command/Ctrl + S) to save JSON, including corrections and review decisions.
 
 JSON does not embed the recording. Reattach its original file after reopening a project. Changes are saved explicitly; the app prompts before replacing or closing unsaved work. Exporting text or subtitles does not save review metadata.
 

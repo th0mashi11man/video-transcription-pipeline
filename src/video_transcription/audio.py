@@ -16,6 +16,11 @@ def find_ffmpeg() -> str:
     for candidate in ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"]:
         if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
+    try:
+        from imageio_ffmpeg import get_ffmpeg_exe
+        return get_ffmpeg_exe()
+    except (ImportError, RuntimeError):
+        pass
     raise FileNotFoundError(
         "FFmpeg binary not found. Please install ffmpeg (e.g. 'brew install ffmpeg') or add it to PATH."
     )

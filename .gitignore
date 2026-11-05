@@ -79,3 +79,8 @@ output/
 
 # TypeScript sources are not MPEG transport-stream media.
 !desktop/**/*.ts
+
+# Credentials generated only while packaging a private app.
+desktop/src-tauri/.private/
+*.app/
+*.dmg

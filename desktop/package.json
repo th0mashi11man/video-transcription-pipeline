@@ -7,6 +7,8 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
     "test": "vitest run",
+    "build:private": "node scripts/build-private.mjs",
+    "check:secrets": "python3 ../scripts/check_secrets.py",
     "tauri": "tauri"
   },
   "dependencies": {

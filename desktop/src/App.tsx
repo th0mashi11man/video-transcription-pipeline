@@ -4,19 +4,36 @@ import { open, save, confirm } from "@tauri-apps/plugin-dialog";
 import {
   AudioLines,
   Check,
+  CheckCheck,
+  ChevronDown,
   ChevronRight,
+  CircleHelp,
   Download,
+  FileAudio,
   FileJson,
+  FileText,
   FolderOpen,
   Headphones,
+  Keyboard,
   Link,
+  ListFilter,
   LoaderCircle,
+  LockKeyhole,
+  Maximize2,
+  Pause,
   Play,
+  Repeat2,
+  RotateCcw,
+  RotateCw,
   Save,
+  Search,
   Settings2,
   ShieldCheck,
   SkipForward,
+  SlidersHorizontal,
   Upload,
+  Volume2,
+  VolumeX,
   X,
 } from "lucide-react";
 import { demo } from "./demo";
@@ -71,6 +88,10 @@ export default function App() {
   const [duration, setDuration] = useState(0);
   const [speed, setSpeed] = useState(1);
   const [loop, setLoop] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [includedAccess, setIncludedAccess] = useState(false);
+  const [followPlayback, setFollowPlayback] = useState(true);
   const [settings, setSettings] = useState(false);
   const [token, setToken] = useState("");
   const [connected, setConnected] = useState(false);
@@ -104,10 +125,43 @@ export default function App() {
 
   useEffect(() => {
     if (native)
-      invoke<boolean>("token_status")
-        .then(setConnected)
+      invoke<{ ready: boolean; included: boolean }>("credential_status")
+        .then((status) => {
+          setConnected(status.ready);
+          setIncludedAccess(status.included);
+        })
         .catch((e) => setError(message(e)));
   }, []);
+  useEffect(() => {
+    if (!settings) return;
+    const lastFocus = document.activeElement as HTMLElement | null;
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    const controls = () =>
+      Array.from(
+        dialog?.querySelectorAll<HTMLElement>(
+          "button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), summary",
+        ) ?? [],
+      ).filter((el) => el.getClientRects().length > 0);
+    controls()[0]?.focus();
+    const trapFocus = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const items = controls();
+      const first = items[0],
+        last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    };
+    dialog?.addEventListener("keydown", trapFocus);
+    return () => {
+      dialog?.removeEventListener("keydown", trapFocus);
+      lastFocus?.focus();
+    };
+  }, [settings]);
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
       if (dirty || busy) {
@@ -444,13 +498,6 @@ export default function App() {
   }
   async function transcribe() {
     if (!native || !media?.path || !(await discard())) return;
-    if (speakers && !connected) {
-      setSettings(true);
-      setError(
-        "Connect Hugging Face to use speaker detection, or turn speaker detection off.",
-      );
-      return;
-    }
     setError("");
     setNotice("");
     try {
@@ -497,272 +544,249 @@ export default function App() {
     }
   }
 
+  const totalIssues =
+    flagged +
+    (transcript?.segments.filter((s) => !s.words.length && !s.reviewed)
+      .length ?? 0);
+  const visibleSegments =
+    transcript?.segments.filter(
+      (s) =>
+        (!reviewOnly || passageNeedsReview(s, threshold)) &&
+        segmentText(s).toLocaleLowerCase().includes(query.toLocaleLowerCase()),
+    ) ?? [];
+  const activeSegment =
+    transcript?.segments.findIndex(
+      (s) =>
+        s.start !== null && s.end !== null && now >= s.start && now < s.end,
+    ) ?? -1;
+  const knownSpeakers = speakerIds.filter(Boolean);
+  const currentConfidence = currentWord?.confidence;
+  const projectName = (
+    media?.name ||
+    transcript?.mediaName ||
+    "Untitled project"
+  ).replace(/\.[^.]+$/, "");
+
+  useEffect(() => {
+    if (followPlayback && playing && activeSegment >= 0) {
+      document
+        .getElementById(`segment-${activeSegment}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [activeSegment, followPlayback, playing]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement;
+      const editing =
+        ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) ||
+        target.isContentEditable;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        void saveTranscript();
+      } else if (
+        !editing &&
+        !target.closest("button, a, summary") &&
+        event.code === "Space" &&
+        media &&
+        !sample
+      ) {
+        event.preventDefault();
+        void togglePlayback();
+      } else if (!editing && event.altKey && event.key === "ArrowRight") {
+        event.preventDefault();
+        nextIssue();
+      } else if (event.key === "Escape") setSettings(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  async function togglePlayback() {
+    if (!player.current || !media) return;
+    clip.current = null;
+    try {
+      if (player.current.paused) await player.current.play();
+      else player.current.pause();
+    } catch (e) {
+      setError(message(e));
+    }
+  }
+  function seekTo(seconds: number) {
+    if (!player.current || !media) return;
+    clip.current = null;
+    player.current.currentTime = Math.max(
+      0,
+      Math.min(duration || Infinity, seconds),
+    );
+    setNow(player.current.currentTime);
+  }
+  async function showSample() {
+    if (!(await discard())) return;
+    player.current?.pause();
+    setTranscript(structuredClone(demo));
+    setSample(true);
+    setSelected(null);
+    setDirty(false);
+    setError("");
+  }
+
   return (
-    <div className="app">
-      <header className="topbar">
-        <a className="brand" href="#">
-          <span className="brand-icon">
-            <AudioLines size={23} />
-          </span>
-          <span>
-            Transcript <b>Studio</b>
-            <small>LISTEN CLOSELY. GET IT RIGHT.</small>
-          </span>
-        </a>
-        <div className="top-actions">
-          <span className="local-badge">
-            <span /> Local workspace
-          </span>
+    <div className="studio-shell">
+      <nav className="app-rail" aria-label="Workspace actions">
+        <div className="app-mark" title="Transcript Studio">
+          <AudioLines size={24} />
+        </div>
+        <button
+          className="rail-button active"
+          aria-label="Transcript workspace"
+          onClick={() => setSettings(false)}
+        >
+          <FileText size={21} />
+        </button>
+        <button
+          className="rail-button"
+          aria-label="Open recording"
+          onClick={chooseMedia}
+          disabled={busy}
+        >
+          <FolderOpen size={21} />
+        </button>
+        <button
+          className="rail-button"
+          aria-label="Open transcript"
+          onClick={chooseTranscript}
+          disabled={busy}
+        >
+          <FileJson size={21} />
+        </button>
+        <div className="rail-bottom">
           <button
-            className="icon-button"
+            className="rail-button"
             aria-label="Settings"
-            onClick={() => setSettings(!settings)}
+            onClick={() => setSettings(true)}
           >
-            <Settings2 size={19} />
+            <Settings2 size={21} />
           </button>
+          <span className="profile-monogram" title="Local workspace">
+            TS
+          </span>
         </div>
-      </header>
-      <main>
-        <div className="page-heading">
-          <div>
-            <div className="eyebrow">YOUR WORDS, WITH CONTEXT</div>
-            <h1>From recording to a reliable transcript.</h1>
-            <p>
-              Listen, review the uncertain parts, and make every word count.
-            </p>
-          </div>
-          <button className="primary" disabled={busy} onClick={chooseMedia}>
-            <FolderOpen size={17} /> Open recording
-          </button>
-        </div>
-        <div className="workspace-toolbar">
-          <div className="breadcrumb">
-            <Headphones size={16} />
-            <span>
-              {media?.name ?? transcript?.mediaName ?? "New workspace"}
+      </nav>
+      <div className="studio-main">
+        <header className="studio-header">
+          <div className="project-identity">
+            <span className="project-kicker">
+              TRANSCRIPT STUDIO <span>/</span> WORKSPACE
             </span>
-            <ChevronRight size={14} />
-            <span className="muted">
-              {transcript ? "Review transcript" : "Ready to begin"}
-            </span>
-            {dirty && <span className="unsaved">Unsaved</span>}
+            <div className="project-name">
+              <h1>{projectName}</h1>
+              {dirty ? (
+                <span className="document-state unsaved">
+                  <span /> Unsaved changes
+                </span>
+              ) : (
+                <span className="document-state">
+                  <Check size={12} /> {transcript ? "Saved" : "Local project"}
+                </span>
+              )}
+            </div>
           </div>
-          <div className="button-group">
-            <button disabled={busy} onClick={chooseTranscript}>
-              <FileJson size={16} /> Open transcript
+          <div className="header-actions">
+            <button
+              className="quiet-button open-project"
+              onClick={chooseTranscript}
+              disabled={busy}
+            >
+              <FolderOpen size={16} /> Open project
             </button>
-            <button disabled={!transcript || busy} onClick={saveTranscript}>
-              <Save size={16} /> Save project
+            <button
+              className="quiet-button"
+              aria-label="Save project"
+              disabled={!transcript || busy}
+              onClick={saveTranscript}
+            >
+              <Save size={16} /> Save <kbd>⌘S</kbd>
             </button>
+            <div className="export-control">
+              <Download size={15} />
+              <select
+                aria-label="Export transcript"
+                value=""
+                disabled={!transcript || busy}
+                onChange={(e) => {
+                  if (e.target.value)
+                    void exportFile(e.target.value as "txt" | "srt" | "vtt");
+                }}
+              >
+                <option value="" disabled>
+                  Export
+                </option>
+                <option value="txt">Plain text</option>
+                <option value="srt">SRT subtitles</option>
+                <option value="vtt">WebVTT subtitles</option>
+              </select>
+              <ChevronDown size={12} />
+            </div>
+          </div>
+        </header>
+        <div className="workspace-tabs">
+          <span className="workspace-tab">
+            <FileText size={14} /> Transcript <span className="tab-dot" />
+          </span>
+          <span className="workspace-description">Listen. Review. Refine.</span>
+          <div className="processing-badge">
+            <span /> Processed on your computer
           </div>
         </div>
         {error && (
-          <div role="alert" className="banner error">
-            {error}
+          <div role="alert" className="message-banner error">
+            <CircleHelp size={16} />
+            <span>{error}</span>
             <button
               className="icon-button"
               aria-label="Dismiss error"
               onClick={() => setError("")}
             >
-              <X size={16} />
+              <X size={15} />
             </button>
           </div>
         )}
         {notice && (
-          <div role="status" className="banner notice">
-            {notice}
+          <div role="status" className="message-banner notice">
+            <Check size={15} />
+            <span>{notice}</span>
             <button
               className="icon-button"
               aria-label="Dismiss notice"
               onClick={() => setNotice("")}
             >
-              <X size={16} />
+              <X size={15} />
             </button>
           </div>
         )}
-        {settings && (
-          <section
-            className="settings-panel"
-            aria-label="Transcription settings"
-          >
-            <div className="section-title">
-              <div>
-                <h2>Transcription settings</h2>
-                <p>
-                  Whisper recognizes the words. PyAnnote identifies the
-                  speakers.
-                </p>
-              </div>
+        <main className="studio-workspace">
+          <section className="source-column" aria-label="Recording">
+            <div className="panel-label">
+              <h2>Recording</h2>
               <button
                 className="icon-button"
-                aria-label="Close settings"
-                onClick={() => setSettings(false)}
+                aria-label="Choose a different recording"
+                onClick={chooseMedia}
+                disabled={busy}
               >
-                <X size={18} />
+                <FolderOpen size={16} />
               </button>
             </div>
-            <div className="settings-grid">
-              <div className="engine-settings">
-                <label>
-                  Whisper model
-                  <select
-                    value={model}
-                    disabled={busy}
-                    onChange={(e) => setModel(e.target.value)}
-                  >
-                    <option value="tiny">Tiny · quickest</option>
-                    <option value="base">Base · lightweight</option>
-                    <option value="small">Small · balanced</option>
-                    <option value="medium">Medium · more detail</option>
-                    <option value="large-v3">
-                      Large v3 · highest accuracy
-                    </option>
-                    <option value="turbo">Turbo</option>
-                  </select>
-                </label>
-                <label>
-                  Language code
-                  <input
-                    value={language}
-                    disabled={busy}
-                    onChange={(e) => setLanguage(e.target.value)}
-                    placeholder="Auto-detect (or en, sv, …)"
-                  />
-                </label>
-                <label>
-                  Python executable
-                  <input
-                    value={python}
-                    disabled={busy}
-                    onChange={(e) => setPython(e.target.value)}
-                    placeholder="Use the project's .venv automatically"
-                  />
-                </label>
-                <label className="checkbox">
-                  <input
-                    type="checkbox"
-                    checked={speakers}
-                    disabled={busy}
-                    onChange={(e) => setSpeakers(e.target.checked)}
-                  />{" "}
-                  Identify speakers
-                </label>
-                <p className="help">
-                  First use downloads the selected models. Whisper runs on CPU
-                  on Apple Silicon; speaker detection can use Metal.
-                </p>
-              </div>
-              <div className="token-setup">
-                <div className="token-heading">
-                  <ShieldCheck size={20} />
-                  <h3>Connect Hugging Face</h3>
-                  <span
-                    className={
-                      connected ? "status-pill connected" : "status-pill"
-                    }
-                  >
-                    {connected ? "Token added" : "Setup needed"}
-                  </span>
-                </div>
-                <p>
-                  A free account and read token give PyAnnote access to its
-                  speaker models.
-                </p>
-                <ol>
-                  <li>
-                    <button
-                      className="text-link"
-                      onClick={() => setupLink("token")}
-                    >
-                      Create a read token <Link size={12} />
-                    </button>
-                    <span>
-                      Sign in, choose “Create new token”, then “Read”.
-                    </span>
-                  </li>
-                  <li>
-                    Accept the model agreements:
-                    <div className="model-links">
-                      <button
-                        className="text-link"
-                        onClick={() => setupLink("community")}
-                      >
-                        Speaker diarization ↗
-                      </button>
-                      <button
-                        className="text-link"
-                        onClick={() => setupLink("segmentation")}
-                      >
-                        Segmentation ↗
-                      </button>
-                    </div>
-                  </li>
-                  <li>
-                    Paste your token below. Access is checked on transcription.
-                  </li>
-                </ol>
-                <div className="token-input">
-                  <input
-                    type="password"
-                    aria-label="Hugging Face token"
-                    autoComplete="off"
-                    value={token}
-                    onChange={(e) => setToken(e.target.value)}
-                    placeholder="hf_…"
-                    disabled={!native || busy}
-                  />
-                  <button
-                    disabled={!native || !token.trim() || tokenBusy || busy}
-                    onClick={storeToken}
-                  >
-                    {tokenBusy ? "Saving…" : "Save token"}
-                  </button>
-                </div>
-                <p className="help">
-                  {native
-                    ? "Stored in your operating system’s credential vault. Never saved in a project or activity log."
-                    : "Secure token storage is available in the desktop app."}
-                </p>
-                {connected && (
-                  <button
-                    className="text-link"
-                    disabled={busy}
-                    onClick={async () => {
-                      try {
-                        await invoke("remove_token");
-                        setConnected(false);
-                        setNotice("Stored token removed.");
-                      } catch (e) {
-                        setError(message(e));
-                      }
-                    }}
-                  >
-                    Remove stored token
-                  </button>
-                )}
-              </div>
-            </div>
-          </section>
-        )}
-        <div className="workspace">
-          <aside className="recording-panel">
-            <div className="panel-heading">
-              <h2>
-                <span className="section-number">01</span> Recording
-              </h2>
-              <span className="subtle-tag">
-                {media?.audio ? "AUDIO" : "AUDIO / VIDEO"}
-              </span>
-            </div>
-            <div className={`player ${media ? "has-media" : ""}`}>
+            <div className={`media-stage ${media?.audio ? "is-audio" : ""}`}>
               {media ? (
                 <>
                   <video
                     ref={player}
                     src={media.url}
-                    controls
                     preload="metadata"
-                    className={media.audio ? "audio-player" : ""}
+                    muted={muted}
+                    playsInline
                     onLoadedMetadata={(e) => {
                       setDuration(
                         Number.isFinite(e.currentTarget.duration)
@@ -771,6 +795,9 @@ export default function App() {
                       );
                       e.currentTarget.playbackRate = speed;
                     }}
+                    onPlay={() => setPlaying(true)}
+                    onPause={() => setPlaying(false)}
+                    onEnded={() => setPlaying(false)}
                     onSeeking={() => {
                       const p = player.current;
                       if (
@@ -794,179 +821,347 @@ export default function App() {
                     }}
                     onError={() =>
                       setError(
-                        "This recording could not be played. Try an MP4 (H.264/AAC) video or WAV/MP3 audio file supported by your system.",
+                        "This file cannot be played. Try MP4 video or WAV/MP3 audio supported by your system.",
                       )
                     }
                   />
                   {media.audio && (
-                    <div className="audio-art">
-                      <AudioLines size={60} strokeWidth={1.2} />
-                      <span>A little closer to every word.</span>
+                    <div className="audio-identity">
+                      <div className="audio-icon">
+                        <AudioLines size={46} strokeWidth={1.4} />
+                      </div>
+                      <span>AUDIO RECORDING</span>
+                      <strong>{media.name}</strong>
+                      <small>
+                        {formatTime(duration)}
+                        {knownSpeakers.length
+                          ? ` · ${knownSpeakers.length} speaker${knownSpeakers.length === 1 ? "" : "s"}`
+                          : ""}
+                      </small>
                     </div>
+                  )}
+                  {!media.audio && (
+                    <button
+                      className="video-play-overlay"
+                      aria-label={playing ? "Pause video" : "Play video"}
+                      onClick={togglePlayback}
+                    >
+                      {playing ? <Pause size={24} /> : <Play size={24} />}
+                    </button>
                   )}
                 </>
               ) : (
-                <div className="media-empty">
-                  <div className="wave-symbol">
-                    <AudioLines size={46} strokeWidth={1.3} />
+                <div className="source-empty">
+                  <div className="audio-icon">
+                    <Headphones size={38} strokeWidth={1.3} />
                   </div>
-                  <h3>Your recording belongs here</h3>
+                  <h3>Start with a recording</h3>
                   <p>
-                    Bring in an interview, a lecture,
+                    Open an audio or video file
                     <br />
-                    or a conversation worth keeping.
+                    to create your transcript.
                   </p>
-                  <button onClick={chooseMedia} disabled={busy}>
-                    <Upload size={15} /> Choose audio or video
+                  <button className="primary-button" onClick={chooseMedia}>
+                    <Upload size={15} /> Open recording
                   </button>
                   <small>MP4, MOV, MP3, WAV, and more</small>
                 </div>
               )}
             </div>
-            <div className="playback-row">
-              <span className="timecode">
-                {formatTime(now)} <span>/ {formatTime(duration)}</span>
-              </span>
-              <label className="speed">
-                Speed
-                <select
-                  aria-label="Playback speed"
-                  value={speed}
-                  onChange={(e) => {
-                    const v = Number(e.target.value);
-                    setSpeed(v);
-                    if (player.current) player.current.playbackRate = v;
-                  }}
+            <div className="playback-block">
+              <div className="transport">
+                <span className="transport-time">
+                  {formatTime(now)} <span>/ {formatTime(duration)}</span>
+                </span>
+                <div className="transport-buttons">
+                  <button
+                    className="icon-button"
+                    aria-label="Back 3 seconds"
+                    disabled={!media}
+                    onClick={() => seekTo(now - 3)}
+                  >
+                    <RotateCcw size={18} />
+                    <span className="seconds-label">3</span>
+                  </button>
+                  <button
+                    className="play-button"
+                    aria-label={playing ? "Pause recording" : "Play recording"}
+                    disabled={!media}
+                    onClick={togglePlayback}
+                  >
+                    {playing ? (
+                      <Pause size={19} fill="currentColor" />
+                    ) : (
+                      <Play size={19} fill="currentColor" />
+                    )}
+                  </button>
+                  <button
+                    className="icon-button"
+                    aria-label="Forward 3 seconds"
+                    disabled={!media}
+                    onClick={() => seekTo(now + 3)}
+                  >
+                    <RotateCw size={18} />
+                    <span className="seconds-label">3</span>
+                  </button>
+                </div>
+                <label className="speed-control">
+                  <select
+                    aria-label="Playback speed"
+                    value={speed}
+                    onChange={(e) => {
+                      const rate = Number(e.target.value);
+                      setSpeed(rate);
+                      if (player.current) player.current.playbackRate = rate;
+                    }}
+                  >
+                    {[0.5, 0.75, 1, 1.25, 1.5, 2].map((s) => (
+                      <option key={s} value={s}>
+                        {s}×
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="seek-track">
+                <div className="confidence-markers" aria-hidden="true">
+                  {!sample &&
+                    duration > 0 &&
+                    transcript?.segments.flatMap((s, si) =>
+                      s.words.map((w, wi) =>
+                        needsReview(w, threshold) && w.start !== null ? (
+                          <i
+                            key={`${si}-${wi}`}
+                            style={{
+                              left: `${Math.min(100, (w.start / duration) * 100)}%`,
+                              width: `${Math.max(0.6, (((w.end ?? w.start) - w.start) / duration) * 100)}%`,
+                            }}
+                          />
+                        ) : null,
+                      ),
+                    )}
+                </div>
+                <input
+                  aria-label="Recording position"
+                  type="range"
+                  min="0"
+                  max={duration || 1}
+                  step="0.01"
+                  value={Math.min(now, duration || 1)}
+                  disabled={!media}
+                  onChange={(e) => seekTo(Number(e.target.value))}
+                  style={
+                    {
+                      "--progress": `${duration ? (now / duration) * 100 : 0}%`,
+                    } as React.CSSProperties
+                  }
+                />
+              </div>
+              <div className="timeline-caption">
+                <span>
+                  {transcript && !sample ? (
+                    <>
+                      <i /> Amber marks need a closer listen
+                    </>
+                  ) : (
+                    "Select a word to jump to its time"
+                  )}
+                </span>
+                <button
+                  className="icon-button"
+                  aria-label={muted ? "Unmute recording" : "Mute recording"}
+                  disabled={!media}
+                  onClick={() => setMuted(!muted)}
                 >
-                  {[0.5, 0.75, 1, 1.25, 1.5, 2].map((s) => (
-                    <option key={s} value={s}>
-                      {s}×
-                    </option>
-                  ))}
+                  {muted ? <VolumeX size={15} /> : <Volume2 size={15} />}
+                </button>
+              </div>
+            </div>
+            <div className="source-details">
+              <div>
+                <FileAudio size={15} />
+                <span>{media?.name || "No file selected"}</span>
+                {media && (
+                  <span className="file-type">
+                    {media.audio ? "AUDIO" : "VIDEO"}
+                  </span>
+                )}
+              </div>
+              <dl>
+                <div>
+                  <dt>Language</dt>
+                  <dd>{transcript?.language || "Auto-detect"}</dd>
+                </div>
+                <div>
+                  <dt>Speakers</dt>
+                  <dd>{knownSpeakers.length || "—"}</dd>
+                </div>
+                <div>
+                  <dt>Words</dt>
+                  <dd>{transcript ? words.length : "—"}</dd>
+                </div>
+              </dl>
+            </div>
+            <div className="transcribe-section">
+              <div className="panel-label">
+                <h2>Transcription</h2>
+                <button
+                  className="icon-button"
+                  aria-label="Transcription settings"
+                  onClick={() => setSettings(true)}
+                >
+                  <SlidersHorizontal size={16} />
+                </button>
+              </div>
+              <label className="compact-setting">
+                Quality
+                <select
+                  value={model}
+                  disabled={busy}
+                  onChange={(e) => setModel(e.target.value)}
+                >
+                  <option value="tiny">Quick · Tiny</option>
+                  <option value="base">Fast · Base</option>
+                  <option value="small">Balanced · Small</option>
+                  <option value="medium">Detailed · Medium</option>
+                  <option value="large-v3">Best · Large v3</option>
+                  <option value="turbo">Fast & detailed · Turbo</option>
                 </select>
               </label>
-            </div>
-            <div className="generate">
-              <div>
-                <h3>Make room for the words.</h3>
-                <p>
-                  Generate a timestamped transcript with word confidence and
-                  speaker labels.
-                </p>
+              <label className="toggle-setting">
+                <span>Identify speakers</span>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={speakers}
+                  disabled={busy}
+                  onChange={(e) => setSpeakers(e.target.checked)}
+                />
+              </label>
+              <div className={`engine-state ${connected ? "ready" : ""}`}>
+                <ShieldCheck size={14} />
+                <span>
+                  {connected
+                    ? includedAccess
+                      ? "Speaker access included"
+                      : "Speaker access ready"
+                    : native
+                      ? "Speaker access: set up in Settings"
+                      : "Local engine available in desktop app"}
+                </span>
               </div>
               <button
-                className="primary full"
+                className="primary-button generate-button"
                 disabled={!native || !media || busy}
                 onClick={transcribe}
               >
                 {busy ? (
-                  <LoaderCircle size={17} className="spin" />
+                  <LoaderCircle size={16} className="spin" />
                 ) : (
                   <AudioLines size={17} />
-                )}
-                {busy ? "Transcribing…" : "Transcribe recording"}
+                )}{" "}
+                {busy
+                  ? "Transcribing…"
+                  : transcript
+                    ? "Transcribe again"
+                    : "Transcribe recording"}
+                <ChevronRight size={15} />
               </button>
-              <button
-                className="text-link"
-                disabled={busy}
-                onClick={() => setSettings(true)}
-              >
-                <Settings2 size={13} /> {model} model · speakers{" "}
-                {speakers ? "on" : "off"}
-                {speakers && !connected ? " · connect Hugging Face" : ""}
-              </button>
+              {busy && (
+                <button
+                  className="text-button cancel-job"
+                  onClick={async () => {
+                    try {
+                      await invoke("cancel_transcription");
+                      setJob((j) => ({ ...j, status: "cancelled" }));
+                    } catch (e) {
+                      setError(message(e));
+                    }
+                  }}
+                >
+                  Cancel transcription
+                </button>
+              )}
               {!native && (
-                <p className="help">
-                  Browser preview: attach media and open transcript JSON to try
-                  the editor. Generation runs in the desktop app.
+                <p className="small-note">
+                  Preview mode. Transcription runs in the desktop app.
                 </p>
               )}
             </div>
             {job.status !== "idle" && (
-              <div className="activity">
-                <div className="section-title">
-                  <h3>Activity · {job.status}</h3>
-                  {busy && (
-                    <button
-                      onClick={async () => {
-                        try {
-                          await invoke("cancel_transcription");
-                          setJob((j) => ({ ...j, status: "cancelled" }));
-                        } catch (e) {
-                          setError(message(e));
-                        }
-                      }}
-                    >
-                      Cancel
-                    </button>
-                  )}
-                </div>
-                <pre>{job.log || "Waiting for the local engine…"}</pre>
-              </div>
+              <details className="activity" open={job.status === "failed"}>
+                <summary>
+                  <span className={busy ? "activity-pulse" : ""} />
+                  {busy
+                    ? "Transcribing locally"
+                    : `Transcription ${job.status}`}
+                  <ChevronDown size={13} />
+                </summary>
+                <pre>{job.log || "Starting the local engine…"}</pre>
+              </details>
             )}
-            <div className="privacy-note">
-              <ShieldCheck size={18} />
-              <div>
-                <b>Stays on your computer</b>
-                <p>
-                  Audio is processed locally. An internet connection is used to
-                  download models.
-                </p>
-              </div>
+            <div className="source-bottom">
+              <LockKeyhole size={13} />
+              <span>Your recording stays on this device</span>
             </div>
-          </aside>
-          <section className="transcript-panel">
-            <div className="panel-heading">
-              <h2>
-                <span className="section-number">02</span> Transcript
-              </h2>
-              <div className="export-group">
-                <Download size={14} />
-                <select
-                  aria-label="Export transcript"
-                  disabled={!transcript || busy}
-                  value=""
-                  onChange={(e) => {
-                    if (e.target.value)
-                      void exportFile(e.target.value as "txt" | "srt" | "vtt");
-                  }}
-                >
-                  <option value="" disabled>
-                    Export
-                  </option>
-                  <option value="txt">Plain text</option>
-                  <option value="srt">SRT subtitles</option>
-                  <option value="vtt">WebVTT subtitles</option>
-                </select>
+          </section>
+          <section className="transcript-column" aria-label="Transcript">
+            <div className="transcript-heading">
+              <div>
+                <h2>Transcript</h2>
+                <span>
+                  {sample
+                    ? "Sample transcript · illustrative scores"
+                    : transcript
+                      ? `${words.length} words · ${transcript.segments.length} passages`
+                      : "Your words, in context"}
+                </span>
               </div>
+              {transcript && (
+                <label className="follow-control">
+                  <input
+                    type="checkbox"
+                    checked={followPlayback}
+                    onChange={(e) => setFollowPlayback(e.target.checked)}
+                  />
+                  Follow playback
+                </label>
+              )}
             </div>
             {transcript ? (
               <>
-                <div className="transcript-meta">
-                  <span>
-                    {sample ? "SAMPLE · NO RECORDING" : transcript.language}{" "}
-                    <span className="dot">·</span> {transcript.segments.length}{" "}
-                    passages
-                  </span>
-                  <span>
-                    {words.length} words <span className="dot">·</span>{" "}
-                    {reviewed} reviewed
-                  </span>
-                </div>
-                <div className="review-toolbar">
+                <div className="transcript-tools">
+                  <div className="search-field">
+                    <Search size={15} />
+                    <input
+                      aria-label="Search transcript"
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="Find in transcript…"
+                    />
+                    {query && (
+                      <button
+                        className="icon-button"
+                        aria-label="Clear search"
+                        onClick={() => setQuery("")}
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                    <kbd>⌕</kbd>
+                  </div>
                   <button
-                    className={reviewOnly ? "filter active" : "filter"}
+                    className={`review-filter ${reviewOnly ? "is-active" : ""}`}
+                    aria-pressed={reviewOnly}
                     onClick={() => setReviewOnly(!reviewOnly)}
                   >
-                    <span className="amber-dot" /> Needs review{" "}
-                    <b>
-                      {flagged +
-                        transcript.segments.filter(
-                          (s) => !s.words.length && !s.reviewed,
-                        ).length}
-                    </b>
+                    <ListFilter size={14} />
+                    Needs review<span>{totalIssues}</span>
                   </button>
-                  <label className="threshold">
+                </div>
+                <div className="transcript-context">
+                  <div>
+                    <span className="legend-amber" />
                     Below{" "}
                     <select
                       aria-label="Confidence threshold"
@@ -978,35 +1173,25 @@ export default function App() {
                           {Math.round(n * 100)}%
                         </option>
                       ))}
-                    </select>
-                  </label>
-                  <button className="next-button" onClick={nextIssue}>
-                    Next issue <SkipForward size={14} />
-                  </button>
-                </div>
-                <div className="search-row">
-                  <input
-                    aria-label="Search transcript"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Find in transcript…"
-                  />
-                  <span className="help">
-                    {unknown
-                      ? `${unknown} words without confidence`
-                      : transcript.engine}
+                    </select>{" "}
+                    confidence
+                  </div>
+                  <span>
+                    {reviewed} of {words.length} reviewed
                   </span>
                 </div>
-                <div className="transcript-scroll">
-                  {transcript.segments.filter(
-                    (s) =>
-                      (!reviewOnly || passageNeedsReview(s, threshold)) &&
-                      segmentText(s)
-                        .toLocaleLowerCase()
-                        .includes(query.toLocaleLowerCase()),
-                  ).length === 0 && (
+                <div className="passages-scroll">
+                  {visibleSegments.length === 0 && (
                     <div className="no-results">
-                      No passages match this view.
+                      <CheckCheck size={27} />
+                      <h3>
+                        {query ? "No matching passages" : "All caught up"}
+                      </h3>
+                      <p>
+                        {query
+                          ? "Try another word or clear the filters."
+                          : "No words need review at this confidence threshold."}
+                      </p>
                     </div>
                   )}
                   {transcript.segments.map((s, si) => {
@@ -1017,17 +1202,14 @@ export default function App() {
                         .includes(query.toLocaleLowerCase())
                     )
                       return null;
-                    const active =
-                      now >= (s.start ?? Infinity) &&
-                      now < (s.end ?? -Infinity) &&
-                      !!media;
+                    const active = !sample && !!media && activeSegment === si;
                     return (
                       <article
                         id={`segment-${si}`}
                         key={si}
-                        className={`passage ${selected?.segment === si ? "selected-passage" : ""} ${active ? "playing-passage" : ""}`}
+                        className={`passage ${selected?.segment === si ? "is-selected" : ""} ${active ? "is-playing" : ""}`}
                       >
-                        <div className="passage-meta">
+                        <div className="passage-gutter">
                           <button
                             className="timestamp"
                             onClick={() =>
@@ -1037,185 +1219,487 @@ export default function App() {
                             {formatTime(s.start)}
                           </button>
                           <span
-                            className={`speaker speaker-${speakerIds.indexOf(s.speaker) % 2}`}
-                          >
-                            {s.speaker
-                              ? s.speaker.replace("SPEAKER_", "Speaker ")
-                              : "Speaker unassigned"}
-                          </span>
-                          {s.reviewed && (
-                            <span className="reviewed-label">
-                              <Check size={12} /> Reviewed
-                            </span>
-                          )}
+                            className={`speaker-dot speaker-${speakerIds.indexOf(s.speaker) % 4}`}
+                          />
                         </div>
-                        <div className="passage-text">
-                          {s.words.length ? (
-                            s.words.map((w, wi) => (
-                              <button
-                                key={wi}
-                                aria-label={`${w.text}, ${w.confidence === null ? "confidence unavailable" : `${Math.round(w.confidence * 100)}% confidence`}${w.reviewed ? ", reviewed" : ""}`}
-                                title={`${w.confidence === null ? "Confidence unavailable" : `${Math.round(w.confidence * 100)}% model confidence`}${w.reviewed ? " · Reviewed" : ""}`}
-                                className={`word ${needsReview(w, threshold) ? (w.confidence === null ? "unknown-word" : "uncertain-word") : ""} ${w.reviewed ? "reviewed-word" : ""} ${selected?.segment === si && selected.word === wi ? "selected-word" : ""} ${media && w.start !== null && w.end !== null && now >= w.start && now < w.end ? "playing-word" : ""}`}
-                                onClick={() => select(si, wi)}
-                              >
-                                {w.text}
-                              </button>
-                            ))
-                          ) : (
-                            <button
-                              className="untimed-text"
-                              onClick={() => select(si, null)}
+                        <div className="passage-content">
+                          <div className="passage-heading">
+                            <span
+                              className={`speaker-name speaker-${speakerIds.indexOf(s.speaker) % 4}`}
                             >
-                              {s.text || "(Empty passage)"}
-                            </button>
-                          )}
+                              {s.speaker
+                                ? s.speaker.replace("SPEAKER_", "Speaker ")
+                                : "Speaker unassigned"}
+                            </span>
+                            {s.reviewed ? (
+                              <span className="passage-reviewed">
+                                <Check size={11} />
+                                Reviewed
+                              </span>
+                            ) : (
+                              <button
+                                className="passage-play"
+                                aria-label={`Play passage at ${formatTime(s.start)}`}
+                                disabled={!media || sample || s.start === null}
+                                onClick={() => {
+                                  select(si, s.words.length ? 0 : null);
+                                  seekTo(s.start ?? 0);
+                                  void player.current
+                                    ?.play()
+                                    .catch((e) => setError(message(e)));
+                                }}
+                              >
+                                <Play size={11} />
+                                Listen
+                              </button>
+                            )}
+                          </div>
+                          <p className="passage-text">
+                            {s.words.length ? (
+                              s.words.map((w, wi) => (
+                                <span key={wi}>
+                                  {wi > 0 ? " " : ""}
+                                  <button
+                                    className={`word ${needsReview(w, threshold) ? (w.confidence === null ? "has-no-score" : "is-uncertain") : ""} ${w.reviewed ? "is-reviewed" : ""} ${selected?.segment === si && selected.word === wi ? "is-selected" : ""} ${!sample && media && w.start !== null && w.end !== null && now >= w.start && now < w.end ? "is-current" : ""}`}
+                                    aria-label={`${w.text}, ${w.confidence === null ? "confidence unavailable" : `${Math.round(w.confidence * 100)}% confidence`}${w.reviewed ? ", reviewed" : ""}`}
+                                    onClick={() => select(si, wi)}
+                                  >
+                                    {w.text}
+                                  </button>
+                                </span>
+                              ))
+                            ) : (
+                              <button
+                                className="untimed-text"
+                                onClick={() => select(si, null)}
+                              >
+                                {s.text || "(Empty passage)"}
+                              </button>
+                            )}
+                          </p>
                         </div>
                       </article>
                     );
                   })}
+                  <div className="transcript-end">
+                    <span />
+                    <span>
+                      {sample ? "END OF SAMPLE" : "END OF TRANSCRIPT"}
+                    </span>
+                    <span />
+                  </div>
                 </div>
-                <div className="legend">
+                <div className="transcript-footer">
                   <span>
-                    <i className="amber-dot" /> Low confidence
+                    <i className="legend-amber" />
+                    Needs review
                   </span>
+                  {unknown > 0 && (
+                    <span>
+                      <i className="legend-unknown" />
+                      No score ({unknown})
+                    </span>
+                  )}
                   <span>
-                    <i className="unknown-dot" /> Unavailable
+                    <Check size={12} />
+                    Reviewed
                   </span>
-                  <span>
-                    <Check size={13} /> Reviewed
-                  </span>
-                  <span>Click a word to listen & edit</span>
+                  <button className="text-button" onClick={nextIssue}>
+                    Next issue
+                    <SkipForward size={13} />
+                  </button>
                 </div>
               </>
             ) : (
               <div className="transcript-empty">
-                <div className="paper-icon">
-                  <div />
-                  <div />
-                  <div />
-                  <div />
+                <div className="empty-document">
+                  <FileText size={40} strokeWidth={1} />
                 </div>
-                <div className="eyebrow">A CLEARER PICTURE, WORD BY WORD</div>
-                <h2>The first draft is just the beginning.</h2>
+                <h2>Ready when you are.</h2>
                 <p>
-                  Your transcript will appear here, with uncertain words
-                  <br className="wide-only" /> highlighted so you know where to
-                  listen closer.
+                  Open a recording, then transcribe it.
+                  <br />
+                  Uncertain words will be highlighted here.
                 </p>
-                <div className="empty-steps">
-                  <span>
-                    <i>1</i> Add a recording
-                  </span>
-                  <ChevronRight size={14} />
-                  <span>
-                    <i>2</i> Transcribe
-                  </span>
-                  <ChevronRight size={14} />
-                  <span>
-                    <i>3</i> Listen & refine
-                  </span>
-                </div>
-                <button
-                  className="sample-button"
-                  onClick={async () => {
-                    if (!(await discard())) return;
-                    setTranscript(structuredClone(demo));
-                    setSample(true);
-                    setSelected(null);
-                    setDirty(false);
-                    setError("");
-                  }}
-                >
-                  Explore a sample transcript <ChevronRight size={15} />
+                <button className="secondary-button" onClick={chooseMedia}>
+                  <FolderOpen size={16} />
+                  Open recording
                 </button>
+                <button
+                  className="text-button sample-link"
+                  onClick={showSample}
+                >
+                  Explore a sample
+                  <ChevronRight size={14} />
+                </button>
+                <div className="empty-shortcut">
+                  <Headphones size={14} />
+                  <span>Already have a transcript?</span>
+                  <button className="text-button" onClick={chooseTranscript}>
+                    Open JSON
+                  </button>
+                </div>
               </div>
             )}
-            {selected && currentSegment && (
-              <div className="editor">
-                <div className="section-title">
-                  <h3>
-                    {currentWord ? "Review word" : "Review passage"}{" "}
-                    <span className="editor-confidence">
-                      {currentWord
-                        ? currentWord.confidence === null
-                          ? "Confidence unavailable"
-                          : `${Math.round(currentWord.confidence * 100)}% model confidence`
-                        : "No word-level timing"}
-                    </span>
-                  </h3>
+          </section>
+          <aside className="review-column" aria-label="Word review">
+            <div className="panel-label">
+              <h2>Review</h2>
+              <span className="review-count">{totalIssues} to check</span>
+            </div>
+            {selected && currentSegment ? (
+              <div className="word-editor">
+                <div className="selected-label">
+                  {currentWord ? "SELECTED WORD" : "SELECTED PASSAGE"}
                   <button
                     className="icon-button"
                     aria-label="Close word editor"
                     onClick={() => setSelected(null)}
                   >
-                    <X size={16} />
+                    <X size={14} />
                   </button>
                 </div>
-                {currentWord &&
-                  currentWord.text !== currentWord.originalText && (
-                    <p className="help">Original: {currentWord.originalText}</p>
+                <h3 className="selected-text">
+                  {currentWord?.text || segmentText(currentSegment)}
+                </h3>
+                <div
+                  className={`confidence-readout ${currentConfidence !== null && currentConfidence !== undefined && currentConfidence < threshold ? "low" : ""}`}
+                >
+                  {currentConfidence === null ||
+                  currentConfidence === undefined ? (
+                    <>
+                      <CircleHelp size={15} />
+                      Confidence unavailable
+                    </>
+                  ) : (
+                    <>
+                      <span className="confidence-value">
+                        {Math.round(currentConfidence * 100)}
+                        <small>%</small>
+                      </span>
+                      <span>model confidence</span>
+                    </>
                   )}
-                <div className="editor-controls">
-                  <button
-                    disabled={!media || sample || currentSegment.start === null}
-                    onClick={replay}
-                  >
-                    <Play size={15} /> Replay context
-                  </button>
-                  <label className="checkbox">
-                    <input
-                      type="checkbox"
-                      checked={loop}
-                      onChange={(e) => setLoop(e.target.checked)}
-                    />{" "}
-                    Loop
-                  </label>
-                  <span className="help">1 second of context on each side</span>
                 </div>
+                {typeof currentConfidence === "number" && (
+                  <div
+                    className="confidence-meter"
+                    style={
+                      {
+                        "--confidence": `${currentConfidence * 100}%`,
+                      } as React.CSSProperties
+                    }
+                  >
+                    <span />
+                  </div>
+                )}
+                <p className="confidence-explanation">
+                  {currentWord?.reviewed
+                    ? "Reviewed by you. The original model score is kept."
+                    : currentConfidence === null ||
+                        currentConfidence === undefined
+                      ? "No score was supplied. Listen to check this passage."
+                      : currentConfidence < threshold
+                        ? "A closer listen would help. Check the word in its original context."
+                        : "The model is fairly confident. You can still listen and make a correction."}
+                </p>
+                <div className="review-divider" />
+                <div className="review-section-label">
+                  LISTEN IN CONTEXT
+                  <span>
+                    {formatTime(currentWord?.start ?? currentSegment.start)}
+                  </span>
+                </div>
+                <button
+                  className="context-button"
+                  disabled={!media || sample || currentSegment.start === null}
+                  onClick={replay}
+                >
+                  <Play size={16} fill="currentColor" />
+                  Replay context<span>±1s</span>
+                </button>
+                <label className="toggle-setting loop-setting">
+                  <span>
+                    <Repeat2 size={14} />
+                    Loop this section
+                  </span>
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={loop}
+                    onChange={(e) => setLoop(e.target.checked)}
+                  />
+                </label>
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
                     updateSelected();
                   }}
                 >
-                  <input
+                  <label className="correction-label" htmlFor="word-correction">
+                    CORRECT THE TEXT
+                  </label>
+                  <textarea
+                    id="word-correction"
                     aria-label="Correction"
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
                     disabled={busy}
+                    rows={2}
+                    onKeyDown={(e) => {
+                      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                        e.preventDefault();
+                        updateSelected();
+                      }
+                    }}
                   />
+                  {currentWord &&
+                    currentWord.text !== currentWord.originalText && (
+                      <p className="original-word">
+                        Original: <span>{currentWord.originalText}</span>
+                      </p>
+                    )}
                   <button
                     type="submit"
-                    className="primary"
+                    aria-label="Save correction"
+                    className="primary-button save-correction"
                     disabled={busy || !draft.trim()}
                   >
-                    <Check size={16} /> Save correction
+                    <Check size={16} />
+                    Save correction<kbd>⌘↵</kbd>
                   </button>
                 </form>
-                <div className="editor-bottom">
-                  <button
-                    className="text-link"
-                    disabled={busy}
-                    onClick={() => updateSelected(true)}
-                  >
-                    <Check size={14} /> Mark whole passage reviewed
+                <button
+                  className="review-passage-button"
+                  disabled={busy}
+                  onClick={() => updateSelected(true)}
+                >
+                  <CheckCheck size={16} />
+                  Mark passage reviewed
+                </button>
+                <button className="next-issue-button" onClick={nextIssue}>
+                  Next issue
+                  <SkipForward size={15} />
+                </button>
+              </div>
+            ) : (
+              <div className="review-empty">
+                <div className="review-empty-icon">
+                  <Headphones size={26} strokeWidth={1.3} />
+                </div>
+                <h3>A closer listen.</h3>
+                <p>
+                  Select a highlighted word to hear it in context and make a
+                  correction.
+                </p>
+                {transcript && totalIssues > 0 && (
+                  <button className="secondary-button" onClick={nextIssue}>
+                    Review next word
+                    <SkipForward size={14} />
                   </button>
-                  <button className="text-link" onClick={nextIssue}>
-                    Next issue <ChevronRight size={14} />
-                  </button>
+                )}
+                <div className="review-guide">
+                  <span>
+                    <i className="legend-amber" />
+                    Low confidence
+                  </span>
+                  <p>Amber highlights point to words worth checking.</p>
+                  <span>
+                    <Check size={13} />
+                    Reviewed
+                  </span>
+                  <p>Your corrections keep the original timing.</p>
                 </div>
               </div>
             )}
-          </section>
-        </div>
-        <footer>
-          <span>Made for a more careful kind of listening.</span>
+            <div className="review-bottom">
+              <Keyboard size={14} />
+              <div>
+                <span>
+                  <kbd>Space</kbd> Play / pause
+                </span>
+                <span>
+                  <kbd>⌥ →</kbd> Next issue
+                </span>
+              </div>
+            </div>
+          </aside>
+        </main>
+        <footer className="status-bar">
           <span>
-            Model confidence is a review aid. Always verify important details.
+            <span className="status-dot" />
+            Local workspace{sample && <b>Sample · no recording linked</b>}
+          </span>
+          <span>
+            {transcript
+              ? `${transcript.language} · ${knownSpeakers.length} speaker${knownSpeakers.length === 1 ? "" : "s"}`
+              : "Audio & video transcription"}
+            <span className="status-separator" />
+            Confidence is a review aid, not a guarantee.
           </span>
         </footer>
-      </main>
+      </div>
+      {settings && (
+        <div
+          className="modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSettings(false);
+          }}
+        >
+          <section
+            className="settings-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-title"
+          >
+            <header>
+              <div>
+                <span className="eyebrow">WORKSPACE</span>
+                <h2 id="settings-title">Transcription settings</h2>
+              </div>
+              <button
+                className="icon-button"
+                aria-label="Close settings"
+                onClick={() => setSettings(false)}
+              >
+                <X size={20} />
+              </button>
+            </header>
+            <div className="settings-body">
+              <div className="settings-intro">
+                <ShieldCheck size={20} />
+                <div>
+                  <strong>
+                    {connected
+                      ? includedAccess
+                        ? "Speaker access is included"
+                        : "Speaker access is ready"
+                      : "Speaker access"}
+                  </strong>
+                  <p>
+                    {includedAccess
+                      ? "This private build is already connected. No account setup is needed."
+                      : connected
+                        ? "Your saved credential is used automatically."
+                        : "Add a Hugging Face read token to identify speakers."}
+                  </p>
+                </div>
+                {connected && <Check size={17} />}
+              </div>
+              <div className="settings-fields">
+                <label>
+                  Language
+                  <input
+                    value={language}
+                    onChange={(e) => setLanguage(e.target.value)}
+                    placeholder="Auto-detect, or a code such as en or sv"
+                    disabled={busy}
+                  />
+                </label>
+                <label>
+                  Python executable
+                  <input
+                    value={python}
+                    onChange={(e) => setPython(e.target.value)}
+                    placeholder="Use the local environment automatically"
+                    disabled={busy}
+                  />
+                  <small>
+                    Advanced: change this only to use another installed
+                    environment.
+                  </small>
+                </label>
+              </div>
+              {!includedAccess && (
+                <details className="credential-details" open={!connected}>
+                  <summary>
+                    Speaker credential
+                    <ChevronDown size={14} />
+                  </summary>
+                  <p>
+                    Use a free Hugging Face read token with access to the
+                    speaker models.
+                  </p>
+                  <div className="setup-links">
+                    <button
+                      className="text-button"
+                      onClick={() => setupLink("token")}
+                    >
+                      Create token
+                      <Link size={12} />
+                    </button>
+                    <button
+                      className="text-button"
+                      onClick={() => setupLink("community")}
+                    >
+                      Speaker model agreement
+                      <Link size={12} />
+                    </button>
+                    <button
+                      className="text-button"
+                      onClick={() => setupLink("segmentation")}
+                    >
+                      Segmentation agreement
+                      <Link size={12} />
+                    </button>
+                  </div>
+                  <div className="token-entry">
+                    <input
+                      type="password"
+                      aria-label="Hugging Face token"
+                      autoComplete="off"
+                      value={token}
+                      onChange={(e) => setToken(e.target.value)}
+                      placeholder="Paste a read token"
+                      disabled={!native || busy}
+                    />
+                    <button
+                      className="secondary-button"
+                      disabled={!native || !token.trim() || tokenBusy || busy}
+                      onClick={storeToken}
+                    >
+                      {tokenBusy ? "Saving…" : "Save securely"}
+                    </button>
+                  </div>
+                  <p className="small-note">
+                    Saved in your operating system credential vault, separately
+                    from projects.
+                  </p>
+                  {connected && (
+                    <button
+                      className="text-button remove-token"
+                      disabled={busy}
+                      onClick={async () => {
+                        try {
+                          await invoke("remove_token");
+                          setConnected(false);
+                        } catch (e) {
+                          setError(message(e));
+                        }
+                      }}
+                    >
+                      Remove saved credential
+                    </button>
+                  )}
+                </details>
+              )}
+              <p className="settings-footnote">
+                <LockKeyhole size={13} />
+                Audio is processed locally. First use may download the selected
+                model.
+              </p>
+            </div>
+            <footer>
+              <button
+                className="primary-button"
+                onClick={() => setSettings(false)}
+              >
+                Done
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
       <input
         ref={mediaInput}
         type="file"

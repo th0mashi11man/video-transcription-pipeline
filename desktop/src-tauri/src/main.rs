@@ -75,8 +75,52 @@ fn stored_token() -> Result<Option<String>, String> {
     }
 }
 #[tauri::command]
-fn token_status() -> Result<bool, String> {
-    Ok(stored_token()?.is_some())
+fn token_status(app: tauri::AppHandle) -> Result<bool, String> {
+    Ok(resolve_token(&app)?.is_some())
+}
+
+fn included_token(app: &tauri::AppHandle) -> Option<String> {
+    let path = app
+        .path()
+        .resource_dir()
+        .ok()?
+        .join("private/huggingface-token");
+    let value = fs::read_to_string(path).ok()?;
+    let token = value.trim();
+    if token.starts_with("hf_") && token.len() >= 10 && !token.chars().any(char::is_whitespace) {
+        Some(token.to_owned())
+    } else {
+        None
+    }
+}
+
+fn resolve_token(app: &tauri::AppHandle) -> Result<Option<String>, String> {
+    // Personal builds work immediately, including on a recipient's computer.
+    // Standard/public builds have no included credential and use the OS vault.
+    if let Some(token) = included_token(app) {
+        return Ok(Some(token));
+    }
+    stored_token()
+}
+
+#[derive(Serialize)]
+struct CredentialStatus {
+    ready: bool,
+    included: bool,
+}
+
+#[tauri::command]
+fn credential_status(app: tauri::AppHandle) -> Result<CredentialStatus, String> {
+    if included_token(&app).is_some() {
+        return Ok(CredentialStatus {
+            ready: true,
+            included: true,
+        });
+    }
+    Ok(CredentialStatus {
+        ready: stored_token()?.is_some(),
+        included: false,
+    })
 }
 #[tauri::command]
 fn save_token(token: String) -> Result<(), String> {
@@ -165,24 +209,36 @@ fn start_transcription(
         return Err("A transcription is already running.".into());
     }
     let token = if speakers {
-        Some(stored_token()?.ok_or("Connect Hugging Face in Settings first.")?)
+        Some(resolve_token(&app)?.ok_or(
+            "Speaker access is missing. Add a credential in Settings or use a private app build.",
+        )?)
     } else {
         None
     };
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let source = if cfg!(debug_assertions) {
-        root.join("src")
+    let resources = app.path().resource_dir().map_err(|e| e.to_string())?;
+    let packaged_source = resources.join("python");
+    let source = if packaged_source.join("video_transcription").is_dir() {
+        packaged_source
     } else {
-        app.path()
-            .resource_dir()
-            .map_err(|e| e.to_string())?
-            .join("python")
+        root.join("src")
     };
-    let default_python = root.join(if cfg!(windows) {
+    let bundled_python = resources.join(if cfg!(windows) {
+        "runtime/python.exe"
+    } else {
+        "runtime/bin/python3"
+    });
+    let project_python = root.join(if cfg!(windows) {
         ".venv/Scripts/python.exe"
     } else {
         ".venv/bin/python"
     });
+    let default_python = if bundled_python.is_file() {
+        bundled_python.clone()
+    } else {
+        project_python
+    };
+    let use_bundled_python = python.is_none() && bundled_python.is_file();
     let executable = python.unwrap_or_else(|| {
         if default_python.exists() {
             default_python.to_string_lossy().into_owned()
@@ -204,6 +260,12 @@ fn start_transcription(
     let log = fs::File::create(directory.join("activity.log")).map_err(|e| e.to_string())?;
     let log = Arc::new(Mutex::new(log));
     let mut command = Command::new(executable);
+    if use_bundled_python {
+        command
+            .env("PYTHONHOME", resources.join("runtime"))
+            .env("PYTHONDONTWRITEBYTECODE", "1")
+            .env_remove("VIRTUAL_ENV");
+    }
     command
         .arg("-u")
         .arg("-m")
@@ -328,6 +390,7 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             token_status,
+            credential_status,
             save_token,
             remove_token,
             open_setup_page,
