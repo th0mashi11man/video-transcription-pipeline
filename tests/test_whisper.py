@@ -45,7 +45,7 @@ def test_missing_token_does_not_silently_disable_speakers(monkeypatch, tmp_path)
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.delenv("HUGGINGFACE_TOKEN", raising=False)
     monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(get_token=lambda: None))
-    with pytest.raises(ValueError, match="Connect Hugging Face"):
+    with pytest.raises(ValueError, match="Set HF_TOKEN"):
         whisper.transcribe_media(media, do_diarize=True)
 
 

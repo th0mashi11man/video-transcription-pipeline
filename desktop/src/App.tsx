@@ -4,12 +4,9 @@ import { open, save, confirm } from "@tauri-apps/plugin-dialog";
 import {
   AudioLines,
   CheckCheck,
-  FileJson,
   FileText,
   FolderOpen,
-  ListFilter,
   LoaderCircle,
-  MoreHorizontal,
   PanelRight,
   Pause,
   Play,
@@ -17,8 +14,6 @@ import {
   RotateCw,
   Save,
   Search,
-  Settings2,
-  ShieldCheck,
   SkipForward,
   SquareArrowUp,
   Volume2,
@@ -31,7 +26,6 @@ import {
   formatTime,
   needsReview,
   normalizeTranscript,
-  passageNeedsReview,
   segmentText,
   serializeTranscript,
   type Transcript,
@@ -86,7 +80,6 @@ const mediaExtensions = [
 
 export default function App() {
   const [view, setView] = useState<TranscriptView>({ ...defaultView });
-  const [showView, setShowView] = useState(false);
   const [showInspector, setShowInspector] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportKind, setExportKind] = useState<
@@ -101,7 +94,6 @@ export default function App() {
   const [sample, setSample] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [threshold, setThreshold] = useState(0.8);
-  const [reviewOnly, setReviewOnly] = useState(false);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<{
     segment: number;
@@ -114,13 +106,7 @@ export default function App() {
   const [loop, setLoop] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
-  const [includedAccess, setIncludedAccess] = useState(false);
   const [followPlayback, setFollowPlayback] = useState(true);
-  const [settings, setSettings] = useState(false);
-  const [token, setToken] = useState("");
-  const [connected, setConnected] = useState(false);
-  const [tokenBusy, setTokenBusy] = useState(false);
-  const [python, setPython] = useState("");
   const [model, setModel] = useState("small");
   const [language, setLanguage] = useState("");
   const [speakers, setSpeakers] = useState(true);
@@ -134,12 +120,6 @@ export default function App() {
   const revision = useRef(0);
   const busy = job.status === "running";
   const words = transcript?.segments.flatMap((s) => s.words) ?? [];
-  const flagged = words.filter((w) => needsReview(w, threshold)).length;
-  const unknown = words.filter((w) => w.confidence === null).length;
-  const reviewed = words.filter((w) => w.reviewed).length;
-  const speakerIds = [
-    ...new Set(transcript?.segments.map((s) => s.speaker) ?? []),
-  ];
   const currentSegment =
     selected && transcript ? transcript.segments[selected.segment] : null;
   const currentWord =
@@ -154,19 +134,12 @@ export default function App() {
   }, [notice]);
   useEffect(() => {
     if (native)
-      invoke<{ ready: boolean; included: boolean }>("credential_status")
-        .then((status) => {
-          setConnected(status.ready);
-          setIncludedAccess(status.included);
-        })
-        .catch((e) => setError(message(e)));
-    if (native)
       invoke<boolean>("engine_status")
         .then(setEngineReady)
         .catch(() => setEngineReady(false));
   }, []);
   useEffect(() => {
-    if (!settings && !exportOpen) return;
+    if (!exportOpen) return;
     const lastFocus = document.activeElement as HTMLElement | null;
     const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
     const controls = () =>
@@ -194,7 +167,7 @@ export default function App() {
       dialog?.removeEventListener("keydown", trapFocus);
       lastFocus?.focus();
     };
-  }, [settings, exportOpen]);
+  }, [exportOpen]);
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
       if (dirty || busy) {
@@ -565,7 +538,6 @@ export default function App() {
       setNotice("No words need review.");
       return;
     }
-    setReviewOnly(false);
     setQuery("");
     select(next.segment, next.word);
     window.setTimeout(
@@ -583,7 +555,7 @@ export default function App() {
     try {
       await invoke("start_transcription", {
         mediaPath: media.path,
-        python: python.trim() || null,
+        python: null,
         model,
         language: language.trim() || null,
         speakers,
@@ -595,47 +567,11 @@ export default function App() {
       setError(message(e));
     }
   }
-  async function storeToken() {
-    setTokenBusy(true);
-    setError("");
-    try {
-      await invoke("save_token", { token: token.trim() });
-      setToken("");
-      setConnected(true);
-      setNotice(
-        "Token saved securely. Model access will be checked when you transcribe.",
-      );
-    } catch (e) {
-      setError(message(e));
-    } finally {
-      setTokenBusy(false);
-    }
-  }
-  async function setupLink(page: string) {
-    const urls: Record<string, string> = {
-      token: "https://huggingface.co/settings/tokens",
-      community:
-        "https://huggingface.co/pyannote/speaker-diarization-community-1",
-      segmentation: "https://huggingface.co/pyannote/segmentation-3.0",
-    };
-    try {
-      if (native) await invoke("open_setup_page", { page });
-      else window.open(urls[page], "_blank", "noopener,noreferrer");
-    } catch (e) {
-      setError(message(e));
-    }
-  }
-
-  const totalIssues =
-    flagged +
-    (transcript?.segments.filter((s) => !s.words.length && !s.reviewed)
-      .length ?? 0);
   const activeSegment =
     transcript?.segments.findIndex(
       (s) =>
         s.start !== null && s.end !== null && now >= s.start && now < s.end,
     ) ?? -1;
-  const knownSpeakers = speakerIds.filter(Boolean);
   const currentConfidence = currentWord?.confidence;
   const projectName = (
     transcript?.mediaName ||
@@ -653,8 +589,8 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (settings || exportOpen) {
-        if (event.key === 'Escape') { event.preventDefault(); setSettings(false); setExportOpen(false); }
+      if (exportOpen) {
+        if (event.key === 'Escape') { event.preventDefault(); setExportOpen(false); }
         return;
       }
       const target = event.target as HTMLElement;
@@ -684,9 +620,7 @@ export default function App() {
         event.preventDefault();
         nextIssue();
       } else if (event.key === "Escape") {
-        setSettings(false);
         setExportOpen(false);
-        setShowView(false);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -730,15 +664,6 @@ export default function App() {
       .filter(
         (row) =>
           row.kind === "turn" &&
-          (!reviewOnly ||
-            row.tokens.some((token) =>
-              token.word !== null
-                ? needsReview(
-                    transcript!.segments[token.segment].words[token.word],
-                    threshold,
-                  )
-                : !transcript!.segments[token.segment].reviewed,
-            )) &&
           (rowText(row, view) + " " + speakerName(row.speaker))
             .toLocaleLowerCase()
             .includes(query.toLocaleLowerCase()),
@@ -834,10 +759,12 @@ export default function App() {
             <Save size={18} />
           </button>
         </div>
-        <div className="document-title">
-          <h1>{projectName}</h1>
-          {dirty && <span>Edited</span>}
-          {sample && <span>Sample</span>}
+        <div className="document-title" data-tauri-drag-region
+          title={transcript?.mediaName || media?.name || "Untitled"}>
+          <FileText size={14} className="document-icon" aria-hidden="true" />
+          <h1 data-tauri-drag-region>{projectName}</h1>
+          {dirty && <span className="document-state">Edited</span>}
+          {sample && <span className="sample-badge">Sample</span>}
         </div>
         <div className="toolbar-actions">
           <button
@@ -857,15 +784,69 @@ export default function App() {
           >
             <PanelRight size={19} />
           </button>
-          <button
-            title="Settings"
-            aria-label="Settings"
-            onClick={() => setSettings(true)}
-          >
-            <Settings2 size={18} />
-          </button>
         </div>
       </header>
+      <div className="transcript-controls" role="region" aria-label="Transcript controls">
+        <div className="control-group" role="group" aria-label="Transcript display">
+          {([
+            ["speakers", "Speakers"],
+            ["timestamps", "Timestamps"],
+            ["pauses", "Pauses"],
+          ] as const).map(([key, label]) => (
+            <label className="check-row" key={key}>
+              <input type="checkbox" checked={view[key]}
+                onChange={(e) => changeView(key, e.target.checked)} />
+              {label}
+            </label>
+          ))}
+        </div>
+        <div className="control-group" role="group" aria-label="Confidence and review">
+          <label className="check-row">
+            <input type="checkbox" checked={view.uncertainty}
+              onChange={(e) => changeView("uncertainty", e.target.checked)} />
+            Uncertainty
+          </label>
+          <label className="confidence-control">
+            Confidence
+            <select aria-label="Confidence threshold" value={threshold}
+              onChange={(e) => {
+                const value = Number(e.target.value);
+                setThreshold(value);
+                changeView("confidenceThreshold", value);
+              }}>
+              {[0.5, 0.6, 0.7, 0.8, 0.9, 0.95].map((value) => (
+                <option key={value} value={value}>{Math.round(value * 100)}%</option>
+              ))}
+            </select>
+          </label>
+          <label className="check-row">
+            <input type="checkbox" checked={view.reviewed}
+              onChange={(e) => changeView("reviewed", e.target.checked)} />
+            Review marks
+          </label>
+        </div>
+        <div className="control-group playback-controls" role="group" aria-label="Playback display">
+          <label className="check-row">
+            <input type="checkbox" checked={followPlayback}
+              onChange={(e) => setFollowPlayback(e.target.checked)} />
+            Follow playback
+          </label>
+        </div>
+        <div className="search">
+          <Search size={14} />
+          <input
+            aria-label="Search transcript"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search"
+          />
+          {query && (
+            <button aria-label="Clear search" onClick={() => setQuery("")}>
+              <X size={12} />
+            </button>
+          )}
+        </div>
+      </div>
       {error && (
         <div className="message error" role="alert">
           <span>{error}</span>
@@ -1133,101 +1114,6 @@ export default function App() {
           )}
         </aside>
         <section className="transcript-pane" aria-label="Transcript">
-          <div className="transcript-toolbar">
-            <div className="search">
-              <Search size={14} />
-              <input
-                aria-label="Search transcript"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search"
-              />
-              {query && (
-                <button aria-label="Clear search" onClick={() => setQuery("")}>
-                  <X size={12} />
-                </button>
-              )}
-            </div>
-            <button
-              className="filter-button"
-              aria-label="Filter to needs review"
-              aria-pressed={reviewOnly}
-              disabled={!transcript}
-              onClick={() => setReviewOnly(!reviewOnly)}
-            >
-              <ListFilter size={15} />
-              <span>{totalIssues}</span>
-            </button>
-            <div className="view-menu">
-              <button
-                aria-label="Transcript display options"
-                title="Display options"
-                aria-expanded={showView}
-                onClick={() => setShowView(!showView)}
-              >
-                <MoreHorizontal size={19} />
-              </button>
-              {showView && (
-                <div className="popover">
-                  <h3>Display</h3>
-                  {(
-                    [
-                      ["speakers", "Speakers"],
-                      ["timestamps", "Turn timestamps"],
-                      ["pauses", "Pauses"],
-                      ["uncertainty", "Uncertainty"],
-                      ["reviewed", "Review marks"],
-                    ] as const
-                  ).map(([key, label]) => (
-                    <label className="check-row" key={key}>
-                      <input
-                        type="checkbox"
-                        checked={view[key]}
-                        onChange={(e) => changeView(key, e.target.checked)}
-                      />
-                      {label}
-                    </label>
-                  ))}
-                  <label className="threshold">
-                    Confidence
-                    <select
-                      aria-label="Confidence threshold"
-                      value={threshold}
-                      onChange={(e) => {
-                        const value = Number(e.target.value);
-                        setThreshold(value);
-                        setView((old) => ({
-                          ...old,
-                          confidenceThreshold: value,
-                        }));
-                        if (transcript) {
-                          revision.current++;
-                          setDirty(true);
-                        }
-                      }}
-                    >
-                      {[0.5, 0.6, 0.7, 0.8, 0.9, 0.95].map((v) => (
-                        <option key={v} value={v}>
-                          {Math.round(v * 100)}%
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="check-row">
-                    <input
-                      type="checkbox"
-                      checked={followPlayback}
-                      onChange={(e) => setFollowPlayback(e.target.checked)}
-                    />
-                    Follow playback
-                  </label>
-                  <button className="link" onClick={() => setShowView(false)}>
-                    Done
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
           <div className="transcript-scroll">
             {!transcript ? (
               <div className="empty-transcript">
@@ -1252,7 +1138,7 @@ export default function App() {
                 {shownRows.length === 0 && (
                   <div className="empty-transcript">
                     <p>
-                      {query || reviewOnly
+                      {query
                         ? "No matching turns."
                         : "No speech detected."}
                     </p>
@@ -1513,75 +1399,6 @@ export default function App() {
                 onClick={performExport}
               >
                 {exportBusy ? "Exporting…" : "Export"}
-              </button>
-            </footer>
-          </section>
-        </div>
-      )}
-      {settings && (
-        <div className="sheet-backdrop">
-          <section
-            className="sheet"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="settings-title"
-          >
-            <h2 id="settings-title">Settings</h2>
-            <p className="credential-status">
-              <ShieldCheck size={16} />
-              {connected ? "Speaker access ready" : "Speaker access required"}
-            </p>
-            {!includedAccess && (
-              <details open={!connected}>
-                <summary>Speaker credential</summary>
-                <div className="setup-links">
-                  <button className="link" onClick={() => setupLink("token")}>
-                    Create token
-                  </button>
-                  <button
-                    className="link"
-                    onClick={() => setupLink("community")}
-                  >
-                    Speaker model
-                  </button>
-                  <button
-                    className="link"
-                    onClick={() => setupLink("segmentation")}
-                  >
-                    Segmentation model
-                  </button>
-                </div>
-                <input
-                  type="password"
-                  aria-label="Hugging Face token"
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                  placeholder="Read token"
-                  autoComplete="off"
-                />
-                <button
-                  disabled={!native || !token.trim() || tokenBusy || busy}
-                  onClick={storeToken}
-                >
-                  Save securely
-                </button>
-              </details>
-            )}
-            <details>
-              <summary>Advanced</summary>
-              <label>
-                Python executable
-                <input
-                  value={python}
-                  onChange={(e) => setPython(e.target.value)}
-                  placeholder="Automatic"
-                  disabled={busy}
-                />
-              </label>
-            </details>
-            <footer>
-              <button className="primary" onClick={() => setSettings(false)}>
-                Done
               </button>
             </footer>
           </section>

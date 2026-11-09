@@ -44,7 +44,7 @@ if (!publicBuild) {
       ).trim();
     } catch {
       console.error(
-        "Save a speaker credential in the app before making a private build.",
+        "Save a speaker credential in the Mac's Keychain before making a private build.",
       );
       process.exit(1);
     }

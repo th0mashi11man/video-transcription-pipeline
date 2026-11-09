@@ -110,6 +110,7 @@ svg {
   background: var(--window);
 }
 .mac-toolbar {
+  position: relative;
   height: 53px;
   display: flex;
   align-items: center;
@@ -152,22 +153,39 @@ svg {
   margin: 0 3px;
 }
 .document-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   min-width: 0;
-  flex: 1;
+  max-width: calc(100% - 360px);
+  width: max-content;
 }
 .document-title h1 {
   font-size: 13px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  max-width: 46vw;
+  min-width: 0;
 }
 .document-title > span {
-  font-size: 10px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: 11px;
   color: var(--secondary);
+}
+.document-icon {
+  color: var(--secondary);
+  pointer-events: none;
+}
+.document-title .sample-badge {
+  font-size: 10px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: var(--hover);
 }
 .mac-split {
   flex: 1;
@@ -426,14 +444,43 @@ summary {
   min-height: 0;
   min-width: 0;
 }
-.transcript-toolbar {
-  min-height: 48px;
+.transcript-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 8px 14px;
+  min-height: 44px;
+  border-bottom: 1px solid var(--separator);
+  background: var(--window);
+  flex-shrink: 0;
+}
+.control-group {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 9px 20px;
-  border-bottom: 1px solid var(--separator);
-  flex-shrink: 0;
+  padding-right: 14px;
+  border-right: 1px solid var(--separator);
+}
+.control-group.playback-controls {
+  padding-right: 0;
+  border-right: 0;
+}
+.confidence-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.confidence-control select {
+  padding: 3px 5px;
+  font-size: 11px;
+}
+.transcript-controls .search {
+  margin-left: auto;
+  min-width: 120px;
+  max-width: 260px;
 }
 .search {
   display: flex;
@@ -463,63 +510,6 @@ summary {
   border: 0;
   box-shadow: none;
   color: var(--secondary);
-}
-.filter-button {
-  height: 26px;
-  padding: 3px 7px;
-  box-shadow: none;
-  background: transparent;
-  border-color: transparent;
-  font-size: 10px;
-  gap: 4px;
-  color: var(--secondary);
-}
-.filter-button[aria-pressed="true"] {
-  color: var(--accent);
-  background: var(--selected);
-}
-.view-menu {
-  position: relative;
-  margin-left: auto;
-}
-.view-menu > button {
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-  padding: 3px 5px;
-  color: var(--secondary);
-}
-.popover {
-  position: absolute;
-  right: 0;
-  top: 32px;
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
-  gap: 13px;
-  width: 228px;
-  padding: 16px;
-  background: var(--window);
-  border: 1px solid var(--separator);
-  border-radius: 8px;
-  box-shadow: 0 8px 28px #0002;
-}
-.popover h3 {
-  font-size: 12px;
-}
-.popover p {
-  font-size: 10px;
-  color: var(--secondary);
-  line-height: 1.5;
-}
-.threshold {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 12px;
-}
-.threshold select {
-  font-size: 11px;
 }
 .transcript-scroll {
   flex: 1;
@@ -771,8 +761,7 @@ summary {
   font-size: 16px;
   margin-bottom: 24px;
 }
-.sheet > label,
-.sheet details > label {
+.sheet > label {
   display: grid;
   grid-template-columns: 65px minmax(0, 1fr);
   gap: 12px;
@@ -797,34 +786,6 @@ summary {
 .sheet footer > button {
   min-width: 72px;
   font-size: 12px;
-}
-.sheet details {
-  padding: 15px 0;
-  border-top: 1px solid var(--separator);
-  font-size: 12px;
-}
-.sheet details input[type="password"] {
-  margin: 12px 0 9px;
-}
-.setup-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 15px;
-}
-.setup-links .link {
-  font-size: 10px;
-}
-.credential-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--secondary);
-  margin-bottom: 20px;
-}
-.credential-status > svg {
-  color: #2c7b4b;
 }
 .spin {
   animation: spin 1s linear infinite;
@@ -854,8 +815,10 @@ summary {
     background: #492d29;
     color: #f7bba9;
   }
-  .review-mark,
-  .credential-status > svg {
+  .review-mark {
+    color: #8cc59f;
+  }
+  .review-mark {
     color: #8cc59f;
   }
   .sheet {
@@ -886,10 +849,6 @@ summary {
   .source-sidebar {
     padding: 15px 12px;
   }
-  .transcript-toolbar {
-    padding: 8px 14px;
-    gap: 8px;
-  }
   .transcript-scroll {
     padding: 22px 25px 40px;
   }
@@ -901,9 +860,6 @@ summary {
   }
   .turn-heading > button {
     font-size: 10px;
-  }
-  .document-title h1 {
-    max-width: 35vw;
   }
 }
 @media (max-width: 740px) {
@@ -926,9 +882,9 @@ summary {
     top: 0;
     z-index: 15;
   }
-  .document-title h1 {
-    max-width: 29vw;
-    font-size: 11px;
+  .document-title {
+    max-width: calc(100% - 240px);
+    gap: 5px;
   }
   .toolbar-actions {
     gap: 2px;
@@ -1007,12 +963,10 @@ summary {
   .transcript-pane {
     min-height: 450px;
   }
-  .transcript-toolbar {
+  .transcript-controls {
     position: sticky;
     top: 49px;
-    background: var(--paper);
     z-index: 12;
-    padding: 9px 13px;
   }
   .transcript-scroll {
     min-height: 350px;
@@ -1024,13 +978,6 @@ summary {
   }
   .search {
     height: 26px;
-  }
-  .filter-button {
-    font-size: 9px;
-    padding: 3px 4px;
-  }
-  .view-menu > button {
-    padding: 2px;
   }
   .turn-text {
     font-size: 16px;
@@ -1060,9 +1007,6 @@ summary {
   .sheet > label {
     grid-template-columns: 55px 1fr;
     gap: 8px;
-  }
-  .popover {
-    width: 215px;
   }
   .audio-display {
     padding: 12px;

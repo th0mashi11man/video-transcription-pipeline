@@ -40,7 +40,7 @@ def transcribe_media(media_file, output_dir=None, model_name="small", language=N
         from huggingface_hub import get_token
         token = get_token()
     if do_diarize and not token:
-        raise ValueError("Speaker detection needs a Hugging Face read token. Connect Hugging Face in Settings and accept the PyAnnote model agreements.")
+        raise ValueError("Speaker detection needs a Hugging Face read token. Set HF_TOKEN or sign in to Hugging Face and accept the PyAnnote model agreements.")
     out = Path(output_dir).expanduser().resolve() if output_dir else media.parent
     out.mkdir(parents=True, exist_ok=True)
 

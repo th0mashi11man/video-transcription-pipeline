@@ -342,7 +342,7 @@ fn start_transcription(
     }
     let token = if speakers {
         Some(resolve_token(&app)?.ok_or(
-            "Speaker access is missing. Add a credential in Settings or use a private app build.",
+            "Speaker access is missing. Use a private app build with speaker access included.",
         )?)
     } else {
         None

@@ -8,7 +8,7 @@ The interface follows macOS system appearance, with a native title bar, compact 
 
 Choose the recording's language from the Language menu, or leave **Detect automatically** selected. The menu lists Whisper's supported languages by name; Cantonese appears for Large v3 and Turbo, whose tokenizers support it.
 
-Open Display options (the three-dot menu) and use Pauses to show or hide automatic Jeffersonian pause notation:
+Use Pauses in the visible transcript controls to show or hide automatic Jeffersonian pause notation:
 
 - Gaps within a speaker's turn from 0.1 seconds to under 0.2 seconds use `(.)`.
 - Longer gaps use tenths of a second, such as `(0.7)` or `(1.0)`.
@@ -18,7 +18,7 @@ Open Display options (the three-dot menu) and use Pauses to show or hide automat
 
 These are timing estimates from word boundaries, or passage boundaries in older imports. Listen to check them. The app does not infer breath, stress, intonation, or overlap notation. Turning pause display off does not alter source words or erase notation entered manually as text.
 
-Display options control speaker labels, speaker-turn timestamps, uncertainty, and review marks. Consecutive segments by the same speaker form one displayed turn. Turn timestamps use the same word boundaries as the pause timings. Original diarization is retained and used to avoid adding pause symbols across detected overlaps. Display settings and the confidence threshold are preserved in saved JSON projects.
+The toolbar keeps all transcript controls visible: Speakers, Timestamps, and Pauses are grouped together; Uncertainty, Confidence, and Review marks form a review group; Follow playback controls scrolling. Search filters the transcript separately. Consecutive segments by the same speaker form one displayed turn. Timestamps use the same word boundaries as the pause timings. Original diarization is retained and used to avoid adding pause symbols across detected overlaps. Display settings and the confidence threshold are preserved in saved JSON projects.
 
 Playback and transcript timestamps show tenths of a second, such as `00:01:23.5`. Word and TXT exports use the same precision. Original word timings retain their full precision for playback, corrections, and pause calculation.
 
@@ -73,7 +73,7 @@ cd desktop
 npm run build:portable -- --debug
 ```
 
-This packages the first-use downloader and engine manifest. Recipients add a read token through Settings and accept the conditions for [speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1) and [segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0). Speaker detection can be disabled explicitly.
+This packages the first-use downloader and engine manifest. A build without an included credential requires a previously saved Keychain credential. Provision it with the binary's `--store-token-stdin` command, which reads the token from standard input, and accept the conditions for [speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1) and [segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0). The interface has no Settings menu. Speaker detection can be disabled explicitly.
 
 A private build for the intended small group:
 
