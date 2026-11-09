@@ -1,5 +1,6 @@
 import {
   defaultView,
+  formatTime,
   needsReview,
   type Transcript,
   type TranscriptView,
@@ -34,15 +35,7 @@ export function pauseNotation(gap: number): string | null {
 }
 
 export function turnTime(time: number | null): string {
-  if (time === null) return "Untimed";
-  const ms = Math.round(time * 1000);
-  return `${Math.floor(ms / 3600000)
-    .toString()
-    .padStart(2, "0")}:${Math.floor((ms / 60000) % 60)
-    .toString()
-    .padStart(2, "0")}:${Math.floor((ms / 1000) % 60)
-    .toString()
-    .padStart(2, "0")}.${(ms % 1000).toString().padStart(3, "0")}`;
+  return formatTime(time);
 }
 export function speakerName(speaker: string | null) {
   const match = speaker?.match(/^SPEAKER_(\d+)$/);

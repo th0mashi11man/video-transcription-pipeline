@@ -143,7 +143,7 @@ describe("Jeffersonian pause presentation", () => {
   it("retains speaker turns and display settings when saving and reopening", () => {
     const t = {
       ...fixture(),
-      view: { ...withPauses, reviewed: true, confidenceThreshold: 0.9 },
+      view: { ...withPauses, reviewed: true, confidenceThreshold: 0.9, frameRate: 30000 / 1001 },
     };
     const reopened = normalizeTranscript(
       JSON.parse(JSON.stringify(serializeTranscript(t))),
@@ -167,13 +167,24 @@ describe("Jeffersonian pause presentation", () => {
 });
 
 describe("matching Word and text exports", () => {
+  it("uses tenths for displayed turns, Word, and TXT without changing raw times", async () => {
+    const t = fixture();
+    const before = JSON.stringify(t);
+    const view = { ...withPauses, frameRate: 30 };
+    const rows = presentTranscript(t, view);
+    expect(rowHeading(rows[0], view)).toBe("[00:00:00.0–00:00:01.7] Speaker 1:");
+    expect(rowsToText(rows, view)).toContain("00:00:01.7");
+    const zip = unzipSync(await transcriptDocx("Interview", rows, view));
+    expect(strFromU8(zip["word/document.xml"])).toContain("00:00:01.7");
+    expect(JSON.stringify(t)).toBe(before);
+  });
   it("exports the same speaker turns, precise times, pauses, and corrected words", async () => {
     const t = fixture();
     t.segments[0].words[0].text = "Hallo";
     const view = { ...withPauses, reviewed: true };
     const rows = presentTranscript(t, view);
     const txt = rowsToText(rows, view);
-    expect(txt).toContain("[00:00:00.000–00:00:01.700] Speaker 1:");
+    expect(txt).toContain("[00:00:00.0–00:00:01.7] Speaker 1:");
     expect(txt).toContain("⟦Hallo⟧ (0.7) again (.) today.");
     expect(txt).toContain("Yes.✓");
     const zip = unzipSync(await transcriptDocx("Interview", rows, view));
@@ -185,7 +196,7 @@ describe("matching Word and text exports", () => {
       "(0.6)",
       "Speaker 1:",
       "Speaker 2:",
-      "00:00:01.700",
+      "00:00:01.7",
       "✓",
     ])
       expect(xml).toContain(value);

@@ -1,3 +1,5 @@
+import { decimalTime, videoFrameRates } from "./timecode";
+
 export type Word = {
   text: string;
   start: number | null;
@@ -32,6 +34,7 @@ export type TranscriptView = {
   uncertainty: boolean;
   reviewed: boolean;
   confidenceThreshold: number;
+  frameRate: number;
 };
 export const defaultView: TranscriptView = {
   speakers: true,
@@ -40,6 +43,7 @@ export const defaultView: TranscriptView = {
   uncertainty: true,
   reviewed: false,
   confidenceThreshold: 0.8,
+  frameRate: 25,
 };
 
 const record = (value: unknown): Record<string, unknown> => {
@@ -115,6 +119,8 @@ export function normalizeTranscript(
       ? (input.view as Record<string, unknown>)
       : {};
   const view = { ...defaultView };
+  const savedFrameRate = videoFrameRates.find((r) => r.rate === rawView.frameRate);
+  if (savedFrameRate) view.frameRate = savedFrameRate.rate;
   if (
     typeof rawView.confidenceThreshold === "number" &&
     Number.isFinite(rawView.confidenceThreshold) &&
@@ -166,10 +172,7 @@ export const passageNeedsReview = (s: Segment, threshold: number) =>
   (s.words.length ? s.words.some((w) => needsReview(w, threshold)) : true);
 export const formatTime = (n: number | null) => {
   if (n === null) return "Untimed";
-  const sec = Math.floor(n);
-  return `${Math.floor(sec / 60)
-    .toString()
-    .padStart(2, "0")}:${(sec % 60).toString().padStart(2, "0")}`;
+  return decimalTime(n);
 };
 export const subtitleTime = (n: number, separator = ",") => {
   const ms = Math.round(n * 1000);

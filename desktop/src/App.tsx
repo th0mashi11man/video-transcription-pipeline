@@ -49,6 +49,8 @@ import {
   type DisplayToken,
 } from "./presentation";
 import { transcriptDocx } from "./word-export";
+import { transcriptInqScribe } from "./inqscribe-export";
+import { videoFrameRates } from "./timecode";
 
 type Media = { url: string; name: string; path?: string; audio: boolean };
 type Job = {
@@ -78,11 +80,12 @@ export default function App() {
   const [showView, setShowView] = useState(false);
   const [showInspector, setShowInspector] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
-  const [exportKind, setExportKind] = useState<"docx" | "txt" | "srt" | "vtt">(
-    "docx",
-  );
+  const [exportKind, setExportKind] = useState<
+    "docx" | "txt" | "inqscribe" | "srt" | "vtt"
+  >("docx");
   const [exportScope, setExportScope] = useState<"all" | "visible">("all");
   const [exportBusy, setExportBusy] = useState(false);
+  const [detectedFrameRate, setDetectedFrameRate] = useState<string | null>(null);
   const [engineReady, setEngineReady] = useState<boolean | null>(null);
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [media, setMedia] = useState<Media | null>(null);
@@ -269,6 +272,26 @@ export default function App() {
     setNow(0);
     setDuration(0);
   }, [media?.url]);
+  useEffect(() => {
+    let cancelled = false;
+    setDetectedFrameRate(null);
+    if (native && media?.path && !media.audio) {
+      invoke<number | null>("media_frame_rate")
+        .then((rate) => {
+          const match = videoFrameRates.find(
+            (r) => rate !== null && Math.abs(r.rate - rate) < 0.01,
+          );
+          if (!cancelled && match) {
+            setDetectedFrameRate(match.label);
+            if (view.frameRate !== match.rate) changeView("frameRate", match.rate);
+          }
+        })
+        .catch(() => {}); // Unknown rates remain a user choice in Export.
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [media?.path, engineReady]);
 
   async function discard() {
     return (
@@ -333,7 +356,12 @@ export default function App() {
       player.current?.pause();
       clip.current = null;
       setTranscript(parsed);
-      setView(parsed.view ?? { ...defaultView });
+      setView({
+        ...(parsed.view ?? defaultView),
+        ...(detectedFrameRate ? {
+          frameRate: videoFrameRates.find((r) => r.label === detectedFrameRate)!.rate,
+        } : {}),
+      });
       setThreshold(parsed.view?.confidenceThreshold ?? 0.8);
       setSelected(null);
       setSample(false);
@@ -363,12 +391,16 @@ export default function App() {
       setError(message(e));
     }
   }
-  async function writeFile(content: string | Uint8Array, extension: string) {
+  async function writeFile(
+    content: string | Uint8Array,
+    extension: string,
+    suffix = "reviewed",
+  ) {
     const name =
       (transcript?.mediaName || media?.name || "transcript").replace(
         /\.[^.]+$/,
         "",
-      ) + `.reviewed.${extension}`;
+      ) + `.${suffix}.${extension}`;
     if (native) {
       const path = await save({
         defaultPath: name,
@@ -712,9 +744,9 @@ export default function App() {
     job.log.includes("Downloading the local engine") &&
     !job.log.includes("Local engine ready.");
 
-  function changeView(
-    key: Exclude<keyof TranscriptView, "confidenceThreshold">,
-    value: boolean,
+  function changeView<K extends keyof TranscriptView>(
+    key: K,
+    value: TranscriptView[K],
   ) {
     setView((old) => ({ ...old, [key]: value }));
     if (transcript) {
@@ -733,8 +765,16 @@ export default function App() {
           ? await transcriptDocx(projectName, outputRows, view)
           : exportKind === "txt"
             ? rowsToText(outputRows, view)
-            : exportTranscript(transcript, exportKind);
-      if (await writeFile(content, exportKind)) {
+            : exportKind === "inqscribe"
+              ? transcriptInqScribe(outputRows, view)
+              : exportTranscript(transcript, exportKind);
+      if (
+        await writeFile(
+          content,
+          exportKind === "inqscribe" ? "txt" : exportKind,
+          exportKind === "inqscribe" ? "inqscribe" : "reviewed",
+        )
+      ) {
         setExportOpen(false);
         setNotice("Exported.");
       }
@@ -1363,12 +1403,29 @@ export default function App() {
               >
                 <option value="docx">Word document (.docx)</option>
                 <option value="txt">Plain text (.txt)</option>
+                <option value="inqscribe">InqScribe (.txt)</option>
                 <optgroup label="Captions">
                   <option value="srt">SubRip (.srt)</option>
                   <option value="vtt">WebVTT (.vtt)</option>
                 </optgroup>
               </select>
             </label>
+            {exportKind === "inqscribe" && (
+              <label>
+                Frame rate
+                <select
+                  aria-label="Export frame rate"
+                  value={view.frameRate}
+                  onChange={(e) => changeView("frameRate", Number(e.target.value))}
+                >
+                  {videoFrameRates.map(({ label, rate }) => (
+                    <option key={label} value={rate}>
+                      {label} fps{label === "29.97" || label === "59.94" ? " (non-drop)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <label>
               Content
               <select
@@ -1383,12 +1440,22 @@ export default function App() {
                 <option value="visible">Current view</option>
               </select>
             </label>
-            {(exportKind === "docx" || exportKind === "txt") && (
+            {(exportKind === "docx" ||
+              exportKind === "txt" ||
+              exportKind === "inqscribe") && (
               <p className="footnote">
                 Uses the current transcript display settings.
-                {exportKind === "txt" && view.uncertainty
+                {(exportKind === "txt" || exportKind === "inqscribe") &&
+                view.uncertainty
                   ? " Uncertain text is marked with ⟦ ⟧."
                   : ""}
+              </p>
+            )}
+            {exportKind === "inqscribe" && (
+              <p className="footnote">
+                {!detectedFrameRate ? "Choose the recording’s frame rate. " : ""}
+                In InqScribe: File → Import → Tab-delimited Text, {videoFrameRates.find((r) => r.rate === view.frameRate)?.label}
+                {" "}fps.
               </p>
             )}
             <footer>

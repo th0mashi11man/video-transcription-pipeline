@@ -1,12 +1,28 @@
 import { describe, expect, it } from "vitest";
 import {
   exportTranscript,
+  formatTime,
   needsReview,
   normalizeTranscript,
   serializeTranscript,
 } from "./transcript";
 
 describe("transcript import and review", () => {
+  it("shows tenths of seconds and carries rounding through seconds, minutes, and hours", () => {
+    expect(formatTime(83.48)).toBe("00:01:23.5");
+    expect(formatTime(83.4)).toBe("00:01:23.4");
+    expect(formatTime(0.05)).toBe("00:00:00.1");
+    expect(formatTime(59.96)).toBe("00:01:00.0");
+    expect(formatTime(3599.96)).toBe("01:00:00.0");
+    expect(formatTime(null)).toBe("Untimed");
+  });
+  it("defaults legacy or invalid InqScribe frame rates to 25 fps", () => {
+    const legacy = normalizeTranscript({ segments: [] });
+    expect(legacy.view?.frameRate).toBe(25);
+    for (const frameRate of [-1, 0, NaN, 999]) {
+      expect(normalizeTranscript({ segments: [], view: { frameRate } }).view?.frameRate).toBe(25);
+    }
+  });
   it("reads WhisperX alignment scores and Faster Whisper probabilities without inventing missing scores", () => {
     const t = normalizeTranscript({
       segments: [

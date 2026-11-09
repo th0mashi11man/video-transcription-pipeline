@@ -233,6 +233,62 @@ fn open_media(
     Ok(canonical.to_string_lossy().into_owned())
 }
 #[tauri::command]
+async fn media_frame_rate(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<f64>, String> {
+    let media = state.media.lock().map_err(|e| e.to_string())?.clone();
+    let Some(media) = media else { return Ok(None) };
+    let resources = app.path().resource_dir().map_err(|e| e.to_string())?;
+    let python = if resources.join("engine/requirements.txt").is_file() {
+        let engine = engine::Engine::new(
+            &resources,
+            &app.path().app_local_data_dir().map_err(|e| e.to_string())?,
+            &app.path().app_cache_dir().map_err(|e| e.to_string())?,
+        )?;
+        if !engine.ready() {
+            return Ok(None);
+        }
+        engine.python
+    } else {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(if cfg!(windows) {
+            "../../.venv/Scripts/python.exe"
+        } else {
+            "../../.venv/bin/python"
+        })
+    };
+    // PyAV is already part of the local engine. Read stream metadata only;
+    // no engine/model download or video decoding is needed for this request.
+    tauri::async_runtime::spawn_blocking(move || {
+        let output = Command::new(python)
+            .args(["-I", "-c", FRAME_RATE_PROBE])
+            .arg(media)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let rate: f64 = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse()
+            .ok()?;
+        (rate.is_finite() && rate > 0.0).then_some(rate)
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+const FRAME_RATE_PROBE: &str = r#"
+import av, sys
+with av.open(sys.argv[1]) as media:
+    video = next((s for s in media.streams.video
+                  if not s.disposition & av.stream.Disposition.attached_pic), None)
+    rate = (video.average_rate or video.guessed_rate) if video else None
+    if rate:
+        print(float(rate))
+"#;
+#[tauri::command]
 fn read_transcript(path: PathBuf) -> Result<String, String> {
     if path.extension().and_then(|x| x.to_str()) != Some("json") {
         return Err("Choose a JSON transcript.".into());
@@ -513,6 +569,7 @@ fn main() {
             remove_token,
             open_setup_page,
             open_media,
+            media_frame_rate,
             read_transcript,
             write_document,
             write_word_document,

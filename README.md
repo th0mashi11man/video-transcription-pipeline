@@ -18,11 +18,13 @@ These are timing estimates from word boundaries, or passage boundaries in older 
 
 Display options control speaker labels, speaker-turn timestamps, uncertainty, and review marks. Consecutive segments by the same speaker form one displayed turn. Turn timestamps use the same word boundaries as the pause timings. Original diarization is retained and used to avoid adding pause symbols across detected overlaps. Display settings and the confidence threshold are preserved in saved JSON projects.
 
+Playback and transcript timestamps show tenths of a second, such as `00:01:23.5`. Word and TXT exports use the same precision. Original word timings retain their full precision for playback, corrections, and pause calculation.
+
 ## Export
 
 Choose Export in the toolbar, then Word (.docx) or plain text (.txt). Both use the same turn and pause presentation as the screen. You can export the entire transcript or the current filtered view.
 
-- Speaker names and millisecond start/end timestamps are included when visible.
+- Speaker names and start/end timestamps in tenths of a second are included when visible.
 - Automatic pauses appear inline or on separate lines using the same rule as the screen.
 - Word preserves uncertainty shading and visible review marks.
 - TXT represents low-confidence text as `⟦word⟧`, missing scores as `⟦?word?⟧`, and visible review marks as `✓`.
@@ -30,6 +32,10 @@ Choose Export in the toolbar, then Word (.docx) or plain text (.txt). Both use t
 - Corrections are exported; original wording and model scores remain in the JSON project.
 
 SubRip and WebVTT are also available as caption formats. Caption export requires valid passage times. JSON projects do not embed media: attach the source recording after reopening a project. Multitoken corrections keep their original timing; they are not automatically realigned.
+
+For InqScribe, choose **InqScribe (.txt)**. This format uses frame-based `HH:MM:SS.FF` timecodes required by the importer, with the video's frame rate detected by the installed local engine. For audio or unknown rates, choose **Frame rate** in the export sheet (default 25 fps); this setting is saved with the project. Fractional rates use non-drop numbering. In InqScribe, use **File → Import → Tab-delimited Text**, select the exported `.inqscribe.txt` file, and set **Imported Frame Rate** to the same rate chosen in the app.
+
+The file follows [InqScribe's four-field import format](https://docs.inqscribe.com/3.0/formats/tab-delimited-text/): start, end, speaker, transcript, without a header. It uses all turns or the current filtered view and respects display settings, including pauses, uncertainty markers, and review marks. Hidden or missing timestamps are left blank; no timing is invented. Pauses between speakers have an empty speaker field. Multiline text uses InqScribe's vertical-tab convention; tabs within text become spaces. Caption formats SRT and VTT retain the millisecond syntax required by their specifications.
 
 ## Small shared builds and first use
 

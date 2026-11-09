@@ -74,6 +74,7 @@ output/
 *.reviewed.txt
 *.reviewed.srt
 *.reviewed.vtt
+*.inqscribe.txt
 
 .playwright-cli/
 
