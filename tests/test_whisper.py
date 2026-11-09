@@ -56,7 +56,9 @@ def test_requested_speaker_failure_is_actionable_and_redacts_token(monkeypatch, 
     class Pipeline:
         @staticmethod
         def from_pretrained(*args, **kwargs):
-            raise RuntimeError("access denied for hf_secret_token")
+            error = RuntimeError("access denied for hf_secret_token")
+            error.response = SimpleNamespace(status_code=403)
+            raise error
     monkeypatch.setitem(sys.modules, "torch", SimpleNamespace())
     monkeypatch.setitem(sys.modules, "torchaudio", SimpleNamespace())
     monkeypatch.setitem(sys.modules, "pyannote", SimpleNamespace())
@@ -66,6 +68,22 @@ def test_requested_speaker_failure_is_actionable_and_redacts_token(monkeypatch, 
     assert "accept the agreements" in str(error.value)
     assert "hf_secret_token" not in str(error.value)
     assert not list((tmp_path / "output").glob("*.json"))
+
+
+def test_speaker_runtime_errors_do_not_blame_credentials(monkeypatch, tmp_path):
+    fake_recognizer(monkeypatch)
+    media = tmp_path / "input.wav"
+    media.write_bytes(b"source")
+    class Pipeline:
+        @staticmethod
+        def from_pretrained(*args, **kwargs):
+            raise RuntimeError("Object of type int64 is not JSON serializable")
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "pyannote.audio", SimpleNamespace(Pipeline=Pipeline))
+    with pytest.raises(RuntimeError, match="int64") as error:
+        whisper.transcribe_media(media, tmp_path / "output", device="cpu", hf_token="hf_test_token")
+    assert "Check your read token" not in str(error.value)
+    assert "accept the agreements" not in str(error.value)
 
 
 def test_speaker_turns_reach_words_segments_and_saved_json(monkeypatch, tmp_path):
@@ -92,6 +110,10 @@ def test_speaker_turns_reach_words_segments_and_saved_json(monkeypatch, tmp_path
             assert device == "cpu"
         def __call__(self, audio, **kwargs):
             assert audio["sample_rate"] == 16000
+            import numpy as np
+            kwargs["hook"]("segmentation", None, total=np.int64(4), completed=np.int64(4))
+            progress = json.loads((tmp_path / "progress.json").read_text())
+            assert progress["completed"] == 4 and progress["total"] == 4
             annotation = SimpleNamespace(itertracks=lambda **kwargs: iter([
                 (SimpleNamespace(start=0, end=2), 0, "SPEAKER_01"),
             ]))
@@ -99,7 +121,8 @@ def test_speaker_turns_reach_words_segments_and_saved_json(monkeypatch, tmp_path
     monkeypatch.setitem(sys.modules, "torch", torch)
     monkeypatch.setitem(sys.modules, "pyannote", SimpleNamespace())
     monkeypatch.setitem(sys.modules, "pyannote.audio", SimpleNamespace(Pipeline=Pipeline))
-    result, files = whisper.transcribe_media(media, tmp_path / "out", device="cpu", hf_token="hf_test_token")
+    result, files = whisper.transcribe_media(media, tmp_path / "out", device="cpu", hf_token="hf_test_token",
+                                            progress_file=tmp_path / "progress.json")
     assert result["words"][0]["speaker"] == "SPEAKER_01"
     assert result["segments"][0]["speaker"] == "SPEAKER_01"
     assert result["words"][0]["confidence"] == .42

@@ -95,7 +95,9 @@ def transcribe_media(media_file, output_dir=None, model_name="small", language=N
                 from pyannote.audio import Pipeline
                 speaker_model = Pipeline.from_pretrained("pyannote/speaker-diarization-community-1", token=token)
                 if speaker_model is None:
-                    raise RuntimeError("Model access was not granted.")
+                    raise RuntimeError("Speaker model access was not granted. Check your read token and accept the agreements at "
+                                       "huggingface.co/pyannote/speaker-diarization-community-1 and "
+                                       "huggingface.co/pyannote/segmentation-3.0.")
                 speaker_device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
                 speaker_model.to(torch.device(speaker_device))
                 speaker_detail = "Apple GPU · Metal" if speaker_device == "mps" else speaker_device.upper()
@@ -125,9 +127,11 @@ def transcribe_media(media_file, output_dir=None, model_name="small", language=N
             except Exception as exc:
                 # Do not silently return a transcript without the requested speakers.
                 detail = str(exc).replace(token, "[redacted]") if token else str(exc)
-                raise RuntimeError("Speaker detection failed. Check your read token and accept the agreements at "
-                                   "huggingface.co/pyannote/speaker-diarization-community-1 and "
-                                   f"huggingface.co/pyannote/segmentation-3.0. Details: {detail}") from None
+                if getattr(getattr(exc, "response", None), "status_code", None) in (401, 403):
+                    detail = ("Check your read token and accept the agreements at "
+                              "huggingface.co/pyannote/speaker-diarization-community-1 and "
+                              f"huggingface.co/pyannote/segmentation-3.0. Details: {detail}")
+                raise RuntimeError(f"Speaker detection failed. Details: {detail}") from None
         else:
             print("Speaker detection disabled by user.", flush=True)
 
