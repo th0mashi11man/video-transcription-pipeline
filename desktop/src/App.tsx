@@ -765,30 +765,15 @@ export default function App() {
       className={`mac-app ${native && navigator.platform.includes("Mac") ? "native-mac" : ""}`}
     >
       <header className="mac-toolbar" data-tauri-drag-region>
-        <div className="toolbar-actions">
+        <div className="toolbar-actions" role="group" aria-label="Project actions">
           <button
-            title="Open recording (⌘O)"
-            aria-label="Open recording"
-            disabled={busy}
-            onClick={chooseMedia}
-          >
-            <FolderOpen size={19} />
-          </button>
-          <button
-            title="Open project"
+            title="Open project (⌘⇧O)"
             aria-label="Open transcript"
             disabled={busy}
             onClick={chooseTranscript}
           >
-            <FileText size={18} />
+            <FolderOpen size={18} />
           </button>
-        </div>
-        <div className="document-title">
-          <h1>{projectName}</h1>
-          {dirty && <span>Edited</span>}
-          {sample && <span>Sample</span>}
-        </div>
-        <div className="toolbar-actions">
           <button
             title="Save project (⌘S)"
             aria-label="Save project"
@@ -797,6 +782,13 @@ export default function App() {
           >
             <Save size={18} />
           </button>
+        </div>
+        <div className="document-title">
+          <h1>{projectName}</h1>
+          {dirty && <span>Edited</span>}
+          {sample && <span>Sample</span>}
+        </div>
+        <div className="toolbar-actions">
           <button
             title="Export transcript"
             aria-label="Export transcript"
@@ -1093,17 +1085,6 @@ export default function App() {
               <ListFilter size={15} />
               <span>{totalIssues}</span>
             </button>
-            <label
-              className="check-row pause-toggle"
-              title="Estimate pauses from word timing"
-            >
-              <input
-                type="checkbox"
-                checked={view.pauses}
-                onChange={(e) => changeView("pauses", e.target.checked)}
-              />
-              Pauses
-            </label>
             <div className="view-menu">
               <button
                 aria-label="Transcript display options"
@@ -1120,6 +1101,7 @@ export default function App() {
                     [
                       ["speakers", "Speakers"],
                       ["timestamps", "Turn timestamps"],
+                      ["pauses", "Pauses"],
                       ["uncertainty", "Uncertainty"],
                       ["reviewed", "Review marks"],
                     ] as const
@@ -1166,7 +1148,6 @@ export default function App() {
                     />
                     Follow playback
                   </label>
-                  <p>Pause marks are timing estimates.</p>
                   <button className="link" onClick={() => setShowView(false)}>
                     Done
                   </button>

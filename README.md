@@ -6,12 +6,12 @@ A Mac app for creating and reviewing transcripts alongside audio or video, based
 
 The interface follows macOS system appearance, with a native title bar, compact toolbar, recording sidebar, transcript, and optional review inspector. Open a recording, choose Transcribe, and select words to listen and correct them. Space plays or pauses; Command/Ctrl + S saves the project.
 
-Use the Pauses checkbox to show or hide automatic Jeffersonian pause notation:
+Open Display options (the three-dot menu) and use Pauses to show or hide automatic Jeffersonian pause notation:
 
-- Gaps from 0.1 seconds to under 0.2 seconds use `(.)`.
+- Gaps within a speaker's turn from 0.1 seconds to under 0.2 seconds use `(.)`.
 - Longer gaps use tenths of a second, such as `(0.7)` or `(1.0)`.
 - Pauses stay inline when the same speaker continues, including across ASR segments.
-- A pause between different speakers appears on its own line, without a speaker label.
+- A pause of at least 0.2 seconds between different speakers appears on its own line, without a speaker label. Shorter gaps between speakers are omitted.
 - Overlaps, missing timing, and leading/trailing recording silence are not turned into pause symbols.
 
 These are timing estimates from word boundaries, or passage boundaries in older imports. Listen to check them. The app does not infer breath, stress, intonation, or overlap notation. Turning pause display off does not alter source words or erase notation entered manually as text.

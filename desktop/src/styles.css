@@ -456,9 +456,6 @@ summary {
   color: var(--accent);
   background: var(--selected);
 }
-.pause-toggle {
-  font-size: 12px;
-}
 .view-menu {
   position: relative;
   margin-left: auto;
@@ -1001,9 +998,6 @@ summary {
   }
   .transcript-status {
     padding: 7px 15px;
-  }
-  .pause-toggle {
-    font-size: 11px;
   }
   .search {
     height: 26px;

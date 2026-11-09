@@ -83,6 +83,28 @@ describe("Jeffersonian pause presentation", () => {
     expect(rowHeading(rows[1], withPauses)).toBe("");
     expect(rowsToText(rows, withPauses)).toContain("\n\n(0.6)\n\n");
   });
+  it.each([0.1, 0.15, 0.199, 0.2])(
+    "only shows interspeaker gaps of at least 0.2 seconds in the editor and exports (gap %s)",
+    async (gap) => {
+      const t = normalizeTranscript({
+        segments: [
+          { speaker: "SPEAKER_00", text: "Hello", start: 0, end: 1 },
+          { speaker: "SPEAKER_01", text: "Yes", start: 1 + gap, end: 2 },
+        ],
+      });
+      const rows = presentTranscript(t, withPauses);
+      const pauses = rows.filter((row) => row.kind === "pause");
+      expect(pauses).toHaveLength(gap >= 0.2 ? 1 : 0);
+      const txt = rowsToText(rows, withPauses);
+      const zip = unzipSync(await transcriptDocx("Interview", rows, withPauses));
+      const xml = strFromU8(zip["word/document.xml"]);
+      for (const output of [txt, xml]) {
+        expect(output).not.toContain("(.)");
+        if (gap >= 0.2) expect(output).toContain("(0.2)");
+        else expect(output).not.toContain("(0.2)");
+      }
+    },
+  );
   it("removes all pause symbols when switched off, without modifying source words", () => {
     const t = fixture(),
       before = JSON.stringify(t);

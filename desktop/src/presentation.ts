@@ -122,7 +122,11 @@ export function presentTranscript(
         nextTurn !== undefined &&
         diarizedEnd >= nextTurn.start - 1e-6;
       const notation =
-        view.pauses && !overlappingTurns ? pauseNotation(gap) : null;
+        view.pauses &&
+        !overlappingTurns &&
+        (!breakTurn || gap + 1e-6 >= 0.2)
+          ? pauseNotation(gap)
+          : null;
       if (notation && previous) {
         const pause: DisplayToken = {
           kind: "pause",
