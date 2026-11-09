@@ -14,6 +14,8 @@ from pathlib import Path
 from .audio import extract_audio_ffmpeg
 from .export import save_transcription_outputs
 from .pipeline import assign_speakers_to_words, group_words_into_segments, smart_join_tokens
+from .mlx_backend import recognize_mlx, uses_mlx
+from .progress import Progress
 
 MODELS = ("tiny", "base", "small", "medium", "large-v2", "large-v3", "turbo")
 
@@ -21,14 +23,17 @@ MODELS = ("tiny", "base", "small", "medium", "large-v2", "large-v3", "turbo")
 def transcribe_media(media_file, output_dir=None, model_name="small", language=None,
                      device=None, compute_type=None, do_diarize=True, hf_token=None,
                      min_speakers=None, max_speakers=None, start_time=None,
-                     duration=None, cleanup_audio=True):
+                     duration=None, cleanup_audio=True, progress_file=None):
     media = Path(media_file).expanduser().resolve(strict=True)
     if not media.is_file():
         raise ValueError("Choose an audio or video file.")
     if model_name not in MODELS:
         raise ValueError(f"Unsupported Whisper model: {model_name}")
-    if device not in (None, "cpu", "cuda"):
-        raise ValueError("Whisper supports CPU or CUDA. On Apple Silicon, use CPU.")
+    if device not in (None, "cpu", "cuda", "mlx"):
+        raise ValueError("Choose MLX on Apple Silicon, CPU, or CUDA.")
+    if language == "yue" and model_name not in ("large-v3", "turbo"):
+        raise ValueError("Cantonese requires Large v3 or Turbo.")
+    progress = Progress(progress_file)
 
     token = hf_token or os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_TOKEN")
     if do_diarize and not token:
@@ -42,15 +47,8 @@ def transcribe_media(media_file, output_dir=None, model_name="small", language=N
     # Always use a distinct temporary file so source media cannot be overwritten.
     with tempfile.TemporaryDirectory(prefix="transcript-audio-") as temporary:
         audio = Path(temporary) / "audio.wav"
-        print("[1/4] Extracting audio…", flush=True)
+        progress.set("extract", "Preparing recording")
         extract_audio_ffmpeg(media, audio, start_time=start_time, duration=duration)
-        from faster_whisper import WhisperModel
-        if device is None:
-            import ctranslate2
-            device = "cuda" if ctranslate2.get_cuda_device_count() else "cpu"
-        compute_type = compute_type or ("float16" if device == "cuda" else "int8")
-        print(f"[2/4] Loading Whisper {model_name} on {device}. First use downloads model weights…", flush=True)
-        model = WhisperModel(model_name, device=device, compute_type=compute_type)
         # Feed normalized samples directly: newer PyAV releases removed a
         # decoder argument used by Faster Whisper's file-loading helper.
         import numpy as np
@@ -59,22 +57,38 @@ def transcribe_media(media_file, output_dir=None, model_name="small", language=N
             samples = np.frombuffer(stream.readframes(stream.getnframes()), dtype=np.int16).astype(np.float32) / 32768.0
         if samples.size == 0:
             raise ValueError("This recording has no audio samples.")
-        generated, info = model.transcribe(samples, language=language, word_timestamps=True,
-                                           vad_filter=True, beam_size=5)
-        words = []
-        for segment in generated:
-            for word in segment.words or []:
-                words.append({"text": word.word.strip(), "start": float(word.start),
-                              "end": float(word.end), "confidence": float(word.probability),
-                              "speaker": None})
-            print(f"Recognized through {segment.end:.1f}s", flush=True)
-        detected_language = info.language
-        del model
-        gc.collect()
+        if uses_mlx(device):
+            words, detected_language = recognize_mlx(samples, model_name, language, progress)
+            engine, recognition_device = "mlx-whisper", "Apple GPU (Metal)"
+        else:
+            from faster_whisper import WhisperModel
+            if device is None:
+                import ctranslate2
+                device = "cuda" if ctranslate2.get_cuda_device_count() else "cpu"
+            compute_type = compute_type or ("float16" if device == "cuda" else "int8")
+            progress.set("load_model", f"Preparing {model_name.title()} model",
+                         "Missing weights download now; downloaded models are reused.")
+            model = WhisperModel(model_name, device=device, compute_type=compute_type)
+            progress.set("transcribe", "Transcribing", device.upper())
+            generated, info = model.transcribe(samples, language=language, word_timestamps=True,
+                                               vad_filter=True, beam_size=5)
+            words = []
+            for segment in generated:
+                for word in segment.words or []:
+                    words.append({"text": word.word.strip(), "start": float(word.start),
+                                  "end": float(word.end), "confidence": float(word.probability),
+                                  "speaker": None})
+                progress.set("transcribe", "Transcribing", device.upper(),
+                             completed=segment.end, total=len(samples) / 16000, unit="seconds")
+            detected_language = info.language
+            del model
+            gc.collect()
+            engine, recognition_device = "faster-whisper", device
 
         turns = []
         if do_diarize:
-            print("[3/4] Detecting speakers with PyAnnote…", flush=True)
+            progress.set("speaker_model", "Preparing speaker models",
+                         "Downloading missing files. Models are saved locally for future use.")
             try:
                 import torch
                 import wave
@@ -84,6 +98,8 @@ def transcribe_media(media_file, output_dir=None, model_name="small", language=N
                     raise RuntimeError("Model access was not granted.")
                 speaker_device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
                 speaker_model.to(torch.device(speaker_device))
+                speaker_detail = "Apple GPU · Metal" if speaker_device == "mps" else speaker_device.upper()
+                progress.set("speakers", "Identifying speakers", speaker_detail)
                 # FFmpeg already made PCM16 mono WAV. Read it without depending
                 # on TorchCodec's platform-specific FFmpeg shared libraries.
                 with wave.open(str(audio), "rb") as stream:
@@ -95,7 +111,11 @@ def transcribe_media(media_file, output_dir=None, model_name="small", language=N
                     options["min_speakers"] = min_speakers
                 if max_speakers is not None:
                     options["max_speakers"] = max_speakers
-                diarized = speaker_model({"waveform": waveform, "sample_rate": sample_rate}, **options)
+                def speaker_progress(step, artifact, *, total=None, completed=None, **kwargs):
+                    progress.set("speakers", "Identifying speakers", speaker_detail,
+                                 total=total, completed=completed, unit="steps")
+                diarized = speaker_model({"waveform": waveform, "sample_rate": sample_rate},
+                                         hook=speaker_progress, **options)
                 annotation = getattr(diarized, "speaker_diarization", diarized)
                 turns = [(float(turn.start), float(turn.end), str(speaker))
                          for turn, _, speaker in annotation.itertracks(yield_label=True)]
@@ -109,7 +129,7 @@ def transcribe_media(media_file, output_dir=None, model_name="small", language=N
                                    "huggingface.co/pyannote/speaker-diarization-community-1 and "
                                    f"huggingface.co/pyannote/segmentation-3.0. Details: {detail}") from None
         else:
-            print("[3/4] Speaker detection disabled by user.", flush=True)
+            print("Speaker detection disabled by user.", flush=True)
 
         # Returned times refer to the original recording, including CLI clipping.
         offset = sum(float(part) * 60 ** index for index, part in enumerate(reversed(str(start_time or 0).split(":"))))
@@ -117,12 +137,12 @@ def transcribe_media(media_file, output_dir=None, model_name="small", language=N
             word["start"] += offset
             word["end"] += offset
         turns = [(start + offset, end + offset, speaker) for start, end, speaker in turns]
-        result = {"engine": "faster-whisper", "model": model_name, "language": detected_language,
+        result = {"engine": engine, "device": recognition_device, "model": model_name, "language": detected_language,
                   "mediaName": media.name, "confidence_kind": "ASR word probability (uncalibrated)",
                   "text": smart_join_tokens([w["text"] for w in words]), "words": words,
                   "segments": group_words_into_segments(words),
                   "speaker_turns": [{"start": s, "end": e, "speaker": who} for s, e, who in turns]}
-        print("[4/4] Saving transcript…", flush=True)
+        progress.set("save", "Saving transcript")
         paths = save_transcription_outputs(result, out / media.stem, include_speakers=do_diarize)
         if not cleanup_audio:
             import shutil
@@ -130,6 +150,7 @@ def transcribe_media(media_file, output_dir=None, model_name="small", language=N
             if target.resolve() == media:
                 raise ValueError("Refusing to overwrite the source audio with extracted audio.")
             shutil.copyfile(audio, target)
+        progress.set("complete", "Transcript ready")
         return result, paths
 
 
@@ -139,7 +160,7 @@ def main():
     parser.add_argument("--output-dir", "-o")
     parser.add_argument("--model", choices=MODELS, default="small")
     parser.add_argument("--language", "-l")
-    parser.add_argument("--device", choices=("cpu", "cuda"))
+    parser.add_argument("--device", choices=("cpu", "cuda", "mlx"))
     parser.add_argument("--compute-type", choices=("int8", "float32", "float16"))
     parser.add_argument("--diarize", dest="do_diarize", action="store_true", default=True)
     parser.add_argument("--no-diarize", dest="do_diarize", action="store_false")
@@ -150,6 +171,7 @@ def main():
     parser.add_argument("--cleanup-audio", action="store_true")
     # Desktop result path is deliberately separate from the media basename.
     parser.add_argument("--result-file", type=Path)
+    parser.add_argument("--progress-file", type=Path)
     args = vars(parser.parse_args())
     result_file = args.pop("result_file")
     try:

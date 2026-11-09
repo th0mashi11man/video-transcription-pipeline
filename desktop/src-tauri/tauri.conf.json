@@ -43,7 +43,7 @@
       "../../src/video_transcription/": "python/video_transcription/"
     },
     "macOS": {
-      "minimumSystemVersion": "12.0"
+      "minimumSystemVersion": "14.0"
     }
   }
 }

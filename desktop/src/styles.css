@@ -290,6 +290,28 @@ svg {
   cursor: pointer;
   margin: 0;
 }
+.job-progress {
+  padding: 12px;
+  border: 1px solid var(--separator);
+  border-radius: 7px;
+  background: var(--window);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.job-progress p {
+  margin: 6px 0 10px;
+  color: var(--secondary);
+  font-size: 11px;
+}
+.job-progress progress {
+  width: 100%;
+}
+.job-progress span {
+  display: block;
+  margin-top: 5px;
+  color: var(--secondary);
+  font-size: 11px;
+}
 .time-row {
   display: flex;
   align-items: center;
@@ -974,6 +996,7 @@ summary {
     margin: 0;
   }
   .sidebar-group > .footnote,
+  .sidebar-group > .job-progress,
   .sidebar-group > progress,
   .sidebar-group > .link {
     grid-column: 1/-1;

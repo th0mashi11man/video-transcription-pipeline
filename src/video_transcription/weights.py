@@ -5,6 +5,10 @@ import os
 
 
 def download_whisper_weights(model="small"):
+    from .mlx_backend import uses_mlx, download_mlx_model
+    if uses_mlx():
+        from .progress import Progress
+        return download_mlx_model(model, Progress())
     from faster_whisper.utils import download_model
     return download_model(model)
 

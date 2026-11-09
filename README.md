@@ -1,10 +1,12 @@
 # Transcript Studio
 
-A Mac app for creating and reviewing transcripts alongside audio or video, based on [misc-an/video-transcription-pipeline](https://github.com/misc-an/video-transcription-pipeline). Whisper recognizes words; PyAnnote identifies speakers. Processing stays local.
+A Mac app for creating and reviewing transcripts alongside audio or video, based on [misc-an/video-transcription-pipeline](https://github.com/misc-an/video-transcription-pipeline). Whisper recognizes words on the Apple GPU through MLX; PyAnnote identifies speakers through Metal. Processing stays local.
 
 ## Desktop app
 
 The interface follows macOS system appearance, with a native title bar, compact toolbar, recording sidebar, transcript, and optional review inspector. Open a recording, choose Transcribe, and select words to listen and correct them. Space plays or pauses; Command/Ctrl + S saves the project.
+
+Choose the recording's language from the Language menu, or leave **Detect automatically** selected. The menu lists Whisper's supported languages by name; Cantonese appears for Large v3 and Turbo, whose tokenizers support it.
 
 Open Display options (the three-dot menu) and use Pauses to show or hide automatic Jeffersonian pause notation:
 
@@ -43,11 +45,15 @@ The distributed app contains a small engine installer, the interface, and the Py
 
 On first transcription, the app downloads Python 3.12 and pinned engine dependencies into its local application-data directory. Model weights download into a local cache when their model is first used. Later uses reuse both. A failed or cancelled engine installation does not get a completion marker, so it can be retried. Initial setup requires an internet connection and roughly 1 GB of local engine storage, plus the selected models.
 
+The recording sidebar shows the current stage: engine setup, model download, model loading, GPU transcription, or speaker detection. Downloads show actual completed file counts; transcription and speaker processing show real progress when available. Work without a measurable total uses an indeterminate indicator. The app does not invent an ETA. Models stay on this Mac and are reused; switching to a model that has not been downloaded starts its own first-use download.
+
+Apple Silicon uses [MLX Whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper), running on Metal in float16, with word timestamps and probability estimates. MLX model memory is released before PyAnnote uses the same GPU through PyTorch MPS. Existing Faster Whisper weights are a different format, so the first MLX run downloads an MLX model. The app still ships without any model weights. The Metal runtime is pinned to MLX 0.29.3 for compatibility with macOS 14 and later.
+
 The installer manifest is versioned by its content and architecture. Dependency changes use a new environment rather than modifying an active one. App bundles are never modified during setup. Downloads and transcription run in background processes and can be cancelled.
 
 ## Development
 
-Requirements: Node.js 22.12+, Rust, [uv](https://docs.astral.sh/uv/), and the [Tauri macOS prerequisites](https://v2.tauri.app/start/prerequisites/). Current distributed builds target Apple Silicon Macs. Signing and notarization are not configured.
+Requirements: Node.js 22.12+, Rust, [uv](https://docs.astral.sh/uv/), and the [Tauri macOS prerequisites](https://v2.tauri.app/start/prerequisites/). Current distributed builds target Apple Silicon Macs running macOS 14 or later. Signing and notarization are not configured.
 
 ```bash
 uv sync --python 3.12 --extra speakers --extra dev
@@ -96,7 +102,7 @@ uv run --extra speakers transcribe recording.mp4 --output-dir data/output
 uv run transcribe recording.mp4 --no-diarize --model small
 ```
 
-CLI speaker detection uses `HF_TOKEN` or an existing Hugging Face login. Options include `--language`, `--device`, `--compute-type`, speaker bounds, `--start-time`, `--duration`, and `--cleanup-audio`. Model probabilities are uncalibrated estimates; high-confidence words can still be incorrect. On Apple Silicon, Whisper uses CPU/int8 and PyAnnote can use Metal.
+CLI speaker detection uses `HF_TOKEN` or an existing Hugging Face login. Options include `--language`, `--device`, `--compute-type`, speaker bounds, `--start-time`, `--duration`, and `--cleanup-audio`. Model probabilities are uncalibrated estimates; high-confidence words can still be incorrect. Apple Silicon defaults to MLX/Metal; `--device mlx` explicitly selects it. `--device cpu` or `--device cuda` selects Faster Whisper with the corresponding compute type. `--compute-type` applies to Faster Whisper; MLX uses float16. PyAnnote selects MPS, CUDA, or CPU according to availability. `--progress-file` writes the current job stage and actual progress to an atomic JSON file.
 
 The packaged binary also supports `--prepare-engine <local-data-directory>` to provision its engine without opening a window. This uses the same installation plan as the desktop workflow.
 

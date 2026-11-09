@@ -51,12 +51,21 @@ import {
 import { transcriptDocx } from "./word-export";
 import { transcriptInqScribe } from "./inqscribe-export";
 import { videoFrameRates } from "./timecode";
+import { availableLanguages } from "./languages";
 
 type Media = { url: string; name: string; path?: string; audio: boolean };
 type Job = {
   status: "idle" | "running" | "complete" | "failed" | "cancelled";
   log: string;
   result?: unknown;
+  progress?: {
+    stage: string;
+    label: string;
+    detail?: string;
+    completed?: number | null;
+    total?: number | null;
+    unit?: string | null;
+  } | null;
 };
 const native = isTauri();
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -579,7 +588,9 @@ export default function App() {
         language: language.trim() || null,
         speakers,
       });
-      setJob({ status: "running", log: "Starting local transcription…" });
+      setJob({ status: "running", log: "Starting local transcription…",
+        progress: { stage: "starting", label: "Starting transcription",
+          detail: "Checking the local engine and models." } });
     } catch (e) {
       setError(message(e));
     }
@@ -739,10 +750,10 @@ export default function App() {
       ? matching.has(row.id)
       : matching.has(rows[index - 1]?.id) && matching.has(rows[index + 1]?.id),
   );
-  const installing =
-    busy &&
-    job.log.includes("Downloading the local engine") &&
-    !job.log.includes("Local engine ready.");
+  const progress = job.progress;
+  const progressFraction = progress?.total && progress.completed != null
+    ? Math.max(0, Math.min(1, progress.completed / progress.total))
+    : undefined;
 
   function changeView<K extends keyof TranscriptView>(
     key: K,
@@ -1017,7 +1028,11 @@ export default function App() {
               <select
                 value={model}
                 disabled={busy}
-                onChange={(e) => setModel(e.target.value)}
+                onChange={(e) => {
+                  setModel(e.target.value);
+                  if (!availableLanguages(e.target.value).some((l) => l.code === language))
+                    setLanguage("");
+                }}
               >
                 <option value="tiny">Tiny</option>
                 <option value="base">Base</option>
@@ -1029,12 +1044,17 @@ export default function App() {
             </label>
             <label>
               Language
-              <input
+              <select
+                aria-label="Language"
                 value={language}
                 disabled={busy}
                 onChange={(e) => setLanguage(e.target.value)}
-                placeholder="Automatic"
-              />
+              >
+                <option value="">Detect automatically</option>
+                {availableLanguages(model).map(({ code, name }) => (
+                  <option key={code} value={code}>{name}</option>
+                ))}
+              </select>
             </label>
             <label className="check-row">
               <input
@@ -1055,17 +1075,30 @@ export default function App() {
               ) : (
                 <AudioLines size={14} />
               )}{" "}
-              {installing
-                ? "Preparing engine…"
-                : busy
-                  ? "Transcribing…"
+              {busy
+                  ? "Working…"
                   : transcript
                     ? "Transcribe again"
                     : "Transcribe"}
             </button>
             {busy && (
               <>
-                <progress />
+                <div className="job-progress" role="status" aria-live="polite">
+                  <strong>{progress?.label || "Starting transcription"}</strong>
+                  {progress?.detail && <p>{progress.detail}</p>}
+                  <progress
+                    aria-label={progress?.label || "Transcription progress"}
+                    value={progressFraction}
+                    max={1}
+                  />
+                  {progressFraction !== undefined && (
+                    <span>
+                      {progress?.unit === "files"
+                        ? `${progress.completed} of ${progress.total} files`
+                        : `${Math.round(progressFraction * 100)}%`}
+                    </span>
+                  )}
+                </div>
                 <button
                   className="link"
                   onClick={async () => {
@@ -1198,12 +1231,21 @@ export default function App() {
           <div className="transcript-scroll">
             {!transcript ? (
               <div className="empty-transcript">
-                <FileText size={38} strokeWidth={1} />
-                <p>Open a recording or transcript.</p>
-                <button onClick={chooseTranscript}>Open transcript…</button>
-                <button className="link" onClick={showSample}>
-                  Sample
-                </button>
+                {busy ? (
+                  <>
+                    <LoaderCircle size={28} className="spin" />
+                    <p>{progress?.label || "Starting transcription"}</p>
+                  </>
+                ) : (
+                  <>
+                    <FileText size={38} strokeWidth={1} />
+                    <p>Open a recording or transcript.</p>
+                    <button onClick={chooseTranscript}>Open transcript…</button>
+                    <button className="link" onClick={showSample}>
+                      Sample
+                    </button>
+                  </>
+                )}
               </div>
             ) : (
               <>

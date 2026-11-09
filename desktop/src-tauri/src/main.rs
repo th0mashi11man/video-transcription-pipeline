@@ -82,6 +82,7 @@ struct JobStatus {
     status: String,
     log: String,
     result: Option<serde_json::Value>,
+    progress: Option<serde_json::Value>,
 }
 struct Job {
     status: String,
@@ -407,12 +408,15 @@ fn start_transcription(
         .arg(&directory)
         .arg("--result-file")
         .arg(directory.join("result.json"))
+        .arg("--progress-file")
+        .arg(directory.join("progress.json"))
         .arg("--model")
         .arg(model)
         .arg("--cleanup-audio")
         .env("PYTHONPATH", source)
         .env("PYTHONUNBUFFERED", "1")
         .env("PYANNOTE_METRICS_ENABLED", "0")
+        .env("PYTORCH_ENABLE_MPS_FALLBACK", "1")
         .env("HF_HOME", cache.join("models"))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -425,6 +429,7 @@ fn start_transcription(
     } else {
         command.arg("--no-diarize");
     }
+    let progress_path = directory.join("progress.json");
     job.directory = Some(directory);
     job.status = "running".into();
     let shared = Arc::clone(&state.job);
@@ -432,6 +437,15 @@ fn start_transcription(
         let outcome = (|| -> Result<bool, String> {
             if let Some(engine) = engine {
                 if !engine.ready() {
+                    fs::write(
+                        &progress_path,
+                        serde_json::to_vec(&serde_json::json!({
+                            "stage": "setup", "label": "Downloading transcription engine",
+                            "detail": "One-time setup on this Mac. Model downloads follow."
+                        }))
+                        .map_err(|e| e.to_string())?,
+                    )
+                    .map_err(|e| e.to_string())?;
                     log_line(&log, "Downloading the local engine. First use only…");
                     for step in engine.steps()? {
                         if !run_step(step, &shared, &log, None)? {
@@ -474,7 +488,11 @@ fn transcription_status(state: State<AppState>) -> Result<JobStatus, String> {
     let job = state.job.lock().map_err(|e| e.to_string())?;
     let mut log = String::new();
     let mut result = None;
+    let mut progress = None;
     if let Some(dir) = &job.directory {
+        progress = fs::read(dir.join("progress.json"))
+            .ok()
+            .and_then(|data| serde_json::from_slice(&data).ok());
         if let Ok(mut file) = fs::File::open(dir.join("activity.log")) {
             let len = file.metadata().map_err(|e| e.to_string())?.len();
             let _ = file.seek(SeekFrom::Start(len.saturating_sub(8000)));
@@ -492,6 +510,7 @@ fn transcription_status(state: State<AppState>) -> Result<JobStatus, String> {
         status: job.status.clone(),
         log,
         result,
+        progress,
     })
 }
 #[tauri::command]

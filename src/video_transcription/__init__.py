@@ -1,6 +1,6 @@
 """
 Universal Video-to-Text Transcription & Speaker Diarization Pipeline.
-Powered by FFmpeg, Faster Whisper, and PyAnnote.
+Powered by FFmpeg, MLX/Faster Whisper, and PyAnnote.
 """
 
 from .audio import extract_audio_ffmpeg, find_ffmpeg
