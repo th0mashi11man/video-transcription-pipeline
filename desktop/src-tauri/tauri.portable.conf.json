@@ -1,0 +1,10 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "resources": {
+      "../../src/video_transcription/": "python/video_transcription/",
+      ".private/uv": "engine/uv",
+      "engine-requirements.txt": "engine/requirements.txt"
+    }
+  }
+}

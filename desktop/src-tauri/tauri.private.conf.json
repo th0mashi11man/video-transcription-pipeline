@@ -3,8 +3,9 @@
   "bundle": {
     "resources": {
       "../../src/video_transcription/": "python/video_transcription/",
-      ".private/huggingface-token": "private/huggingface-token",
-      ".private/runtime/": "runtime/"
+      ".private/uv": "engine/uv",
+      "engine-requirements.txt": "engine/requirements.txt",
+      ".private/huggingface-token": "private/huggingface-token"
     }
   }
 }

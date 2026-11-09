@@ -5,6 +5,7 @@ export type Word = {
   confidence: number | null;
   originalText: string;
   reviewed: boolean;
+  speaker?: string | null;
 };
 export type Segment = {
   start: number | null;
@@ -20,6 +21,25 @@ export type Transcript = {
   engine: string;
   mediaName: string;
   segments: Segment[];
+  speakerTurns?: { start: number; end: number; speaker: string }[];
+  view?: TranscriptView;
+};
+
+export type TranscriptView = {
+  speakers: boolean;
+  timestamps: boolean;
+  pauses: boolean;
+  uncertainty: boolean;
+  reviewed: boolean;
+  confidenceThreshold: number;
+};
+export const defaultView: TranscriptView = {
+  speakers: true,
+  timestamps: true,
+  pauses: false,
+  uncertainty: true,
+  reviewed: false,
+  confidenceThreshold: 0.8,
 };
 
 const record = (value: unknown): Record<string, unknown> => {
@@ -61,6 +81,7 @@ export function normalizeTranscript(
             end: end !== null && start !== null && end < start ? null : end,
             confidence: score(w.confidence ?? w.probability ?? w.score),
             reviewed: w.reviewed === true,
+            speaker: typeof w.speaker === "string" ? w.speaker : null,
           };
         })
       : [];
@@ -75,6 +96,42 @@ export function normalizeTranscript(
       reviewed: s.reviewed === true,
     };
   });
+  const rawTurns = input.speakerTurns ?? input.speaker_turns;
+  const speakerTurns = Array.isArray(rawTurns)
+    ? rawTurns.flatMap((raw) => {
+        const t = record(raw);
+        const start = time(t.start),
+          end = time(t.end);
+        return start !== null &&
+          end !== null &&
+          end > start &&
+          typeof t.speaker === "string"
+          ? [{ start, end, speaker: t.speaker }]
+          : [];
+      })
+    : [];
+  const rawView =
+    input.view && typeof input.view === "object"
+      ? (input.view as Record<string, unknown>)
+      : {};
+  const view = { ...defaultView };
+  if (
+    typeof rawView.confidenceThreshold === "number" &&
+    Number.isFinite(rawView.confidenceThreshold) &&
+    rawView.confidenceThreshold >= 0 &&
+    rawView.confidenceThreshold <= 1
+  ) {
+    view.confidenceThreshold = rawView.confidenceThreshold;
+  }
+  for (const key of [
+    "speakers",
+    "timestamps",
+    "pauses",
+    "uncertainty",
+    "reviewed",
+  ] as const) {
+    if (typeof rawView[key] === "boolean") view[key] = rawView[key];
+  }
   return {
     version: 1,
     language: typeof input.language === "string" ? input.language : "Unknown",
@@ -83,6 +140,8 @@ export function normalizeTranscript(
     mediaName:
       typeof input.mediaName === "string" ? input.mediaName : mediaName,
     segments,
+    speakerTurns,
+    view,
   };
 }
 

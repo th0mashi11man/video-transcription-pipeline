@@ -1,6 +1,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   cpSync,
+  chmodSync,
   existsSync,
   mkdirSync,
   writeFileSync,
@@ -12,108 +13,97 @@ import { fileURLToPath } from "node:url";
 const desktop = dirname(dirname(fileURLToPath(import.meta.url)));
 const privateDir = join(desktop, "src-tauri", ".private");
 const tokenFile = join(privateDir, "huggingface-token");
-const buildArguments = process.argv.slice(2);
-const reuseRuntime = buildArguments.includes("--reuse-runtime");
-
+const args = process.argv.slice(2);
+const publicBuild = args.includes("--public");
 try {
-  // Refuse to generate a credential file if Git would pick it up.
   execFileSync("git", ["check-ignore", "--quiet", "--", tokenFile], {
     cwd: desktop,
     stdio: "pipe",
   });
 } catch {
-  console.error(
-    "Private packaging is blocked: the credential directory must be ignored by Git.",
-  );
+  console.error("Private build files must be ignored by Git.");
   process.exit(1);
 }
-
-let token = process.env.TRANSCRIPT_STUDIO_HF_TOKEN?.trim();
-if (!token && process.platform === "darwin") {
-  try {
-    token = execFileSync(
-      "/usr/bin/security",
-      [
-        "find-generic-password",
-        "-s",
-        "se.transcriptstudio.desktop",
-        "-a",
-        "hugging-face",
-        "-w",
-      ],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-    ).trim();
-  } catch {
+mkdirSync(privateDir, { recursive: true, mode: 0o700 });
+let token;
+if (!publicBuild) {
+  token = process.env.TRANSCRIPT_STUDIO_HF_TOKEN?.trim();
+  if (!token && process.platform === "darwin") {
+    try {
+      token = execFileSync(
+        "/usr/bin/security",
+        [
+          "find-generic-password",
+          "-s",
+          "se.transcriptstudio.desktop",
+          "-a",
+          "hugging-face",
+          "-w",
+        ],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      ).trim();
+    } catch {
+      console.error(
+        "Save a speaker credential in the app before making a private build.",
+      );
+      process.exit(1);
+    }
+  }
+  if (!token || !/^hf_[A-Za-z0-9]{10,}$/.test(token)) {
     console.error(
-      "No saved speaker credential was found. Add a token in the app, then package again.",
+      "A saved speaker credential is required for a private build.",
     );
     process.exit(1);
   }
 }
-if (!token || !/^hf_[A-Za-z0-9]{10,}$/.test(token)) {
-  console.error(
-    "Private packaging requires the saved credential or TRANSCRIPT_STUDIO_HF_TOKEN.",
-  );
+let uv = process.env.UV_BIN;
+if (!uv) {
+  try {
+    uv = execFileSync("/usr/bin/which", ["uv"], {
+      encoding: "utf8",
+      stdio: "pipe",
+    }).trim();
+  } catch {}
+}
+if (!uv || !existsSync(uv)) {
+  console.error("Install uv to package the first-use engine downloader.");
   process.exit(1);
 }
-
-mkdirSync(privateDir, { recursive: true, mode: 0o700 });
-// The shared app must not depend on Python installed on the sender's Mac.
-// uv's standalone interpreter is relocatable; installed wheels travel with it.
-const projectPython = join(
-  desktop,
-  "..",
-  ".venv",
-  process.platform === "win32" ? "Scripts/python.exe" : "bin/python",
+const bootstrap = join(
+  privateDir,
+  process.platform === "win32" ? "uv.exe" : "uv",
 );
-if (!existsSync(projectPython)) {
-  console.error(
-    "Install the project environment with uv sync --extra speakers first.",
-  );
-  process.exit(1);
-}
-let runtimeInfo;
-try {
-  runtimeInfo = JSON.parse(
+let thinned = false;
+if (process.platform === "darwin") {
+  try {
     execFileSync(
-      projectPython,
+      "/usr/bin/lipo",
       [
-        "-c",
-        'import json,sys,site; import imageio_ffmpeg; print(json.dumps({"base":sys.base_prefix,"site":site.getsitepackages()[0],"version":f"python{sys.version_info.major}.{sys.version_info.minor}"}))',
+        uv,
+        "-thin",
+        process.arch === "arm64" ? "arm64" : "x86_64",
+        "-output",
+        bootstrap,
       ],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-    ),
-  );
-} catch {
-  console.error(
-    "The Python environment is incomplete. Run uv sync --python 3.12 --extra speakers.",
-  );
+      { stdio: "pipe" },
+    );
+    thinned = true;
+  } catch {}
+}
+if (!thinned) cpSync(uv, bootstrap);
+chmodSync(bootstrap, 0o755);
+const manifest = join(desktop, "src-tauri", "engine-requirements.txt");
+if (!existsSync(manifest)) {
+  console.error("The engine manifest is missing.");
   process.exit(1);
 }
-console.log(
-  "Including the local Python engine and audio decoder for a self-contained private build.",
-);
-const runtime = join(privateDir, "runtime");
-const targetSite =
-  process.platform === "win32"
-    ? join(runtime, "Lib", "site-packages")
-    : join(runtime, "lib", runtimeInfo.version, "site-packages");
-if (!(reuseRuntime && existsSync(join(targetSite, "imageio_ffmpeg")))) {
-  cpSync(runtimeInfo.base, runtime, {
-    recursive: true,
-    dereference: false,
-    verbatimSymlinks: true,
-  });
-  cpSync(runtimeInfo.site, targetSite, { recursive: true, dereference: true });
-}
-writeFileSync(tokenFile, token + "\n", { mode: 0o600 });
+if (!publicBuild) writeFileSync(tokenFile, token + "\n", { mode: 0o600 });
 token = undefined;
 const buildEnv = { ...process.env };
 delete buildEnv.TRANSCRIPT_STUDIO_HF_TOKEN;
 console.log(
-  "Packaging a private app with included speaker access. Credential content is never printed.",
+  "Packaging the app without the transcription engine or model weights. Both install locally on first use.",
 );
-let status = 1;
 try {
   const result = spawnSync(
     join(
@@ -125,14 +115,14 @@ try {
     [
       "build",
       "--config",
-      "src-tauri/tauri.private.conf.json",
-      ...buildArguments.filter((arg) => arg !== "--reuse-runtime"),
+      publicBuild
+        ? "src-tauri/tauri.portable.conf.json"
+        : "src-tauri/tauri.private.conf.json",
+      ...args.filter((a) => !["--public", "--reuse-runtime"].includes(a)),
     ],
     { cwd: desktop, env: buildEnv, stdio: "inherit" },
   );
-  status = result.status ?? 1;
+  process.exitCode = result.status ?? 1;
 } finally {
-  // The completed app contains the resource; the source checkout does not.
-  unlinkSync(tokenFile);
+  if (existsSync(tokenFile)) unlinkSync(tokenFile);
 }
-process.exitCode = status;

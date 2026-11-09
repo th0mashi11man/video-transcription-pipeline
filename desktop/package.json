@@ -1,7 +1,7 @@
 {
   "name": "transcript-studio",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
@@ -9,11 +9,13 @@
     "test": "vitest run",
     "build:private": "node scripts/build-private.mjs",
     "check:secrets": "python3 ../scripts/check_secrets.py",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:portable": "node scripts/build-private.mjs --public"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
+    "docx": "^9.15.3",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
