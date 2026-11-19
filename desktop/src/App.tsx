@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { makeProject, readProject, SaveQueue, type RecentProject } from "./project";
+import { makeProject, readProject, SaveQueue } from "./project";
 import { open, save, confirm } from "@tauri-apps/plugin-dialog";
 import {
   AudioLines,
@@ -22,7 +22,6 @@ import {
   VolumeX,
   X,
 } from "lucide-react";
-import { demo } from "./demo";
 import {
   exportTranscript,
   formatTime,
@@ -82,7 +81,6 @@ const mediaExtensions = [
 export default function App() {
   const [projectPath, setProjectPath] = useState<string | null>(null);
   const [recordingLink, setRecordingLink] = useState<{ path: string; name: string } | null>(null);
-  const [recents, setRecents] = useState<RecentProject[]>([]);
   const [saving, setSaving] = useState(false);
   const savedFile = useRef<{ path: string; revision: string } | null>(null);
   const saves = useRef(new SaveQueue());
@@ -201,12 +199,9 @@ export default function App() {
         if (payload === "export") actions.current.export();
       }));
       add(await listen<string>("open-path", ({ payload }) => actions.current.openPath(payload)));
-      const refresh = () => invoke<RecentProject[]>("recent_projects").then((items) => { if (!stopped) setRecents(items); });
-      add(await listen("recents-changed", () => void refresh()));
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       add(await getCurrentWindow().onCloseRequested((event) => { event.preventDefault(); void actions.current.close(); }));
       add(await getCurrentWindow().onFocusChanged(() => { void syncDocument().catch((e) => setError(message(e))); }));
-      await refresh();
       const initial = await invoke<string | null>("window_bootstrap");
       if (initial && !stopped) { if (initial === "__open_dialog__") actions.current.open(); else actions.current.openPath(initial); }
     })().catch((e) => setError(message(e)));
@@ -734,18 +729,6 @@ export default function App() {
     );
     setNow(player.current.currentTime);
   }
-  async function showSample() {
-    if (!(await discard())) return;
-    player.current?.pause();
-    setTranscript(structuredClone(demo));
-    setSample(true);
-    setView({ ...defaultView });
-    setThreshold(0.8);
-    setSelected(null);
-    setDirty(false);
-    setError("");
-  }
-
   const rows = transcript ? presentTranscript(transcript, view, threshold) : [];
   const matching = new Set(
     rows
@@ -1207,8 +1190,6 @@ export default function App() {
                     <FileText size={38} strokeWidth={1} />
                     <p>{media ? "Ready to transcribe" : "Open a project or recording"}</p>
                     {!media && !recordingLink && <button className="primary" onClick={chooseOpen}>Open…</button>}
-                    {!media && !recordingLink && recents.length > 0 && <div className="recent-projects" aria-label="Recent projects">{recents.slice(0,5).map((item) => <button className="link" key={item.path} title={item.path} onClick={() => void openPath(item.path)}>{item.name}</button>)}</div>}
-                    {!media && !recordingLink && <button className="link" onClick={showSample}>Sample</button>}
                   </>
                 )}
               </div>

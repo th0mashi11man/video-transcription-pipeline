@@ -24,7 +24,7 @@ Playback and transcript timestamps show tenths of a second, such as `00:01:23.5`
 
 ## Projects and files
 
-Each project has its own window. **Open…** accepts recordings, `.tstudio` projects, and older JSON transcripts. **Open Recent** and the empty window list reopen recent projects. Opening a project that is already open focuses its existing window.
+Each project has its own window. **Open…** accepts recordings, `.tstudio` projects, and older JSON transcripts. **File → Open Recent** reopens recent projects. Opening a project that is already open focuses its existing window.
 
 **Save** asks for a project name and location once, then updates that file. Changes autosave after the first save, including corrections, speaker information, transcript display settings, transcription choices, and a recording reference. Writes replace the project atomically; external changes produce an error rather than silently being overwritten. **File → Duplicate…** saves a separate project and opens it in another window. Unsaved changes are protected by Save / Don’t Save / Cancel when closing or quitting. Only one local transcription runs at a time across windows.
 

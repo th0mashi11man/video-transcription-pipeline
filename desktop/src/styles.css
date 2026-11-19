@@ -1036,5 +1036,3 @@ summary {
 .recording-action { font-size: 11px; }
 .recording-placeholder { min-height: 135px; padding: 20px; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:10px; color:var(--secondary); text-align:center; overflow-wrap:anywhere; }
 .recording-name { padding: 8px 15px 0; font-size:11px; color:var(--secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.recent-projects { display:flex; flex-direction:column; gap:4px; max-width:300px; }
-.recent-projects button { overflow:hidden; text-overflow:ellipsis; display:block; text-align:center; }
