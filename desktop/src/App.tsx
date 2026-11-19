@@ -6,6 +6,8 @@ import { open, save, confirm } from "@tauri-apps/plugin-dialog";
 import {
   AudioLines,
   CheckCheck,
+  Check,
+  Pencil,
   FileText,
   FolderOpen,
   LoaderCircle,
@@ -27,6 +29,7 @@ import {
   formatTime,
   needsReview,
   normalizeTranscript,
+  renameSpeaker,
   segmentText,
   type Transcript,
   type TranscriptView,
@@ -107,6 +110,7 @@ export default function App() {
     word: number | null;
   } | null>(null);
   const [draft, setDraft] = useState("");
+  const [speakerEdit, setSpeakerEdit] = useState<{ row: string; id: string | null; name: string } | null>(null);
   const [now, setNow] = useState(0);
   const [duration, setDuration] = useState(0);
   const [speed, setSpeed] = useState(1);
@@ -228,6 +232,7 @@ export default function App() {
           setEngineReady(true);
           setSample(false);
           setSelected(null);
+          setSpeakerEdit(null);
           revision.current++;
           setDirty(true);
           setNotice("Transcript ready.");
@@ -398,7 +403,7 @@ export default function App() {
       priorOptions.current = JSON.stringify([project.options.model, project.options.language, project.options.speakers, project.options.followPlayback]);
       setModel(project.options.model); setLanguage(project.options.language);
       setSpeakers(project.options.speakers); setFollowPlayback(project.options.followPlayback);
-      setSelected(null); setSample(false); setDirty(project.legacy); setQuery("");
+      setSelected(null); setSpeakerEdit(null); setSample(false); setDirty(project.legacy); setQuery("");
       setMedia(null);
       setRecordingLink(loaded.recordingPath ? { path: loaded.recordingPath, name: project.recording!.name } : null);
       if (!project.legacy) { savedFile.current = { path: loaded.path, revision: loaded.revision }; setProjectPath(loaded.path); }
@@ -520,6 +525,16 @@ export default function App() {
   async function saveTranscript() {
     if (native) { await persistProject(); return; }
     if (await writeFile(projectContent(), "tstudio", "project")) setDirty(false);
+  }
+  function saveSpeakerName() {
+    if (!speakerEdit || !transcript) return;
+    try {
+      setTranscript(renameSpeaker(transcript, speakerEdit.id, speakerEdit.name));
+      revision.current++;
+      setDirty(true);
+      setSpeakerEdit(null);
+      setError("");
+    } catch (e) { setError(message(e)); }
   }
   function select(segment: number, word: number | null) {
     const s = transcript!.segments[segment];
@@ -735,7 +750,7 @@ export default function App() {
       .filter(
         (row) =>
           row.kind === "turn" &&
-          (rowText(row, view) + " " + speakerName(row.speaker))
+          (rowText(row, view) + " " + (row.speakerLabel ?? speakerName(row.speaker)))
             .toLocaleLowerCase()
             .includes(query.toLocaleLowerCase()),
       )
@@ -1213,16 +1228,27 @@ export default function App() {
                   >
                     {rowHeading(row, view) && (
                       <div className="turn-heading">
-                        <button
-                          onClick={() => {
-                            const token = row.tokens.find(
-                              (t) => t.kind === "word",
-                            );
-                            if (token) select(token.segment, token.word);
-                          }}
-                        >
-                          {rowHeading(row, view)}
-                        </button>
+                        {view.speakers && (speakerEdit?.row === row.id ? (
+                          <form className="speaker-editor" onSubmit={(e) => { e.preventDefault(); saveSpeakerName(); }}>
+                            <input aria-label="Speaker name" autoFocus maxLength={80} value={speakerEdit.name}
+                              onFocus={(e) => e.currentTarget.select()}
+                              onChange={(e) => setSpeakerEdit({ ...speakerEdit, name: e.target.value })}
+                              onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setSpeakerEdit(null); } }} />
+                            <button type="submit" title="Save speaker name" aria-label="Save speaker name"><Check size={14} /></button>
+                            <button type="button" title="Cancel renaming" aria-label="Cancel renaming" onClick={() => setSpeakerEdit(null)}><X size={14} /></button>
+                          </form>
+                        ) : (
+                          <button className="speaker-name" disabled={busy} title="Rename speaker"
+                            aria-label={`Rename ${row.speakerLabel ?? speakerName(row.speaker)}`}
+                            onClick={() => setSpeakerEdit({ row: row.id, id: row.speaker, name: row.speakerLabel ?? speakerName(row.speaker) })}>
+                            {row.speakerLabel ?? speakerName(row.speaker)}<Pencil size={11} aria-hidden="true" />
+                          </button>
+                        ))}
+                        {view.timestamps && row.start !== null && (
+                          <button className="turn-timestamp" title={`Go to ${formatTime(row.start)}`}
+                            aria-label={`Go to ${formatTime(row.start)}`} disabled={!media}
+                            onClick={() => seekTo(row.start!)}>{formatTime(row.start)}</button>
+                        )}
                       </div>
                     )}
                     <p className="turn-text">

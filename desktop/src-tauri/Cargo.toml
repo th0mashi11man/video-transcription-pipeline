@@ -1,6 +1,6 @@
 [package]
 name = "transcript-studio"
-version = "0.3.1"
+version = "0.4.0"
 description = "Local transcription and careful transcript review"
 edition = "2021"
 

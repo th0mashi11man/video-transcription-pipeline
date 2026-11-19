@@ -167,24 +167,25 @@ describe("Jeffersonian pause presentation", () => {
 });
 
 describe("matching Word and text exports", () => {
-  it("uses tenths for displayed turns, Word, and TXT without changing raw times", async () => {
+  it("shows a single short start timestamp in displayed turns, Word, and TXT without changing raw times", async () => {
     const t = fixture();
     const before = JSON.stringify(t);
     const view = { ...withPauses, frameRate: 30 };
     const rows = presentTranscript(t, view);
-    expect(rowHeading(rows[0], view)).toBe("[00:00:00.0–00:00:01.7] Speaker 1:");
-    expect(rowsToText(rows, view)).toContain("00:00:01.7");
+    expect(rowHeading(rows[0], view)).toBe("Speaker 1 · 0:00");
+    expect(rowsToText(rows, view)).toContain("Speaker 2 · 0:02");
+    expect(rowsToText(rows, view)).not.toContain("–");
     const zip = unzipSync(await transcriptDocx("Interview", rows, view));
-    expect(strFromU8(zip["word/document.xml"])).toContain("00:00:01.7");
+    expect(strFromU8(zip["word/document.xml"])).toContain("Speaker 2 · 0:02");
     expect(JSON.stringify(t)).toBe(before);
   });
-  it("exports the same speaker turns, precise times, pauses, and corrected words", async () => {
+  it("exports the same speaker turns, start times, pauses, and corrected words", async () => {
     const t = fixture();
     t.segments[0].words[0].text = "Hallo";
     const view = { ...withPauses, reviewed: true };
     const rows = presentTranscript(t, view);
     const txt = rowsToText(rows, view);
-    expect(txt).toContain("[00:00:00.0–00:00:01.7] Speaker 1:");
+    expect(txt).toContain("Speaker 1 · 0:00");
     expect(txt).toContain("⟦Hallo⟧ (0.7) again (.) today.");
     expect(txt).toContain("Yes.✓");
     const zip = unzipSync(await transcriptDocx("Interview", rows, view));
@@ -194,9 +195,9 @@ describe("matching Word and text exports", () => {
       "(0.7)",
       "(.)",
       "(0.6)",
-      "Speaker 1:",
-      "Speaker 2:",
-      "00:00:01.7",
+      "Speaker 1",
+      "Speaker 2",
+      "Speaker 2 · 0:02",
       "✓",
     ])
       expect(xml).toContain(value);
@@ -215,7 +216,7 @@ describe("matching Word and text exports", () => {
     expect(rowsToText(rows, view)).toBe("Hello again today.\n\nYes.");
     const zip = unzipSync(await transcriptDocx("Interview", rows, view));
     const xml = strFromU8(zip["word/document.xml"]);
-    for (const value of ["Speaker 1:", "00:00:", "FFF0B3", "(0.7)", "✓"])
+    for (const value of ["Speaker 1", "00:00:", "FFF0B3", "(0.7)", "✓"])
       expect(xml).not.toContain(value);
   });
   it("marks missing confidence distinctly in text and Word", async () => {

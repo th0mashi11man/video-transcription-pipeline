@@ -20,7 +20,9 @@ These are timing estimates from word boundaries, or passage boundaries in older 
 
 The toolbar keeps all transcript controls visible: Speakers, Timestamps, and Pauses are grouped together; Uncertainty, Confidence, and Review marks form a review group; Follow playback controls scrolling. Search filters the transcript separately. Consecutive segments by the same speaker form one displayed turn. Timestamps use the same word boundaries as the pause timings. Original diarization is retained and used to avoid adding pause symbols across detected overlaps. Display settings and the confidence threshold are preserved in saved `.tstudio` projects.
 
-Playback and transcript timestamps show tenths of a second, such as `00:01:23.5`. Word and TXT exports use the same precision. Original word timings retain their full precision for playback, corrections, and pause calculation.
+Turn headings show the speaker name and one short start timestamp, such as `Alice · 1:23`. Playback clocks also use whole seconds, adding hours only for recordings longer than an hour. Word and TXT exports use these same readable headings. Original word timings retain their full precision for playback, corrections, and pause calculation.
+
+Click a speaker name above any turn to rename it. Enter or the checkmark applies the name to every turn by that speaker; Escape cancels. Names are saved with the project and used for search and Word, TXT, and InqScribe export. Renaming a speaker preserves the underlying speaker identity and diarization.
 
 ## Projects and files
 
@@ -34,7 +36,7 @@ Recordings are linked, not embedded. A recording inside the project’s folder i
 
 Choose **Export…** in the toolbar or **File → Export As…**. On macOS, format, content, filename, and destination are chosen together in one native save sheet. Word (.docx) and plain text (.txt) create a separate copy and leave the project open. Both use the same turn and pause presentation as the screen. You can export the entire transcript or the current filtered view.
 
-- Speaker names and start/end timestamps in tenths of a second are included when visible.
+- Speaker names and a single start timestamp in minutes and seconds are included when visible.
 - Automatic pauses appear inline or on separate lines using the same rule as the screen.
 - Word preserves uncertainty shading and visible review marks.
 - TXT represents low-confidence text as `⟦word⟧`, missing scores as `⟦?word?⟧`, and visible review marks as `✓`.

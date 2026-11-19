@@ -1036,3 +1036,13 @@ summary {
 .recording-action { font-size: 11px; }
 .recording-placeholder { min-height: 135px; padding: 20px; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:10px; color:var(--secondary); text-align:center; overflow-wrap:anywhere; }
 .recording-name { padding: 8px 15px 0; font-size:11px; color:var(--secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+.turn-heading { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
+.turn-heading > .speaker-name { color:var(--text); font-size:12px; gap:5px; max-width:100%; overflow-wrap:anywhere; }
+.speaker-name svg { opacity:.45; }
+.speaker-name:hover svg, .speaker-name:focus-visible svg { opacity:1; }
+.turn-heading > .turn-timestamp { font-weight:400; color:var(--secondary); font-size:12px; }
+.turn-heading > .turn-timestamp:disabled { opacity:1; }
+.speaker-editor { display:flex; align-items:center; gap:4px; max-width:100%; }
+.speaker-editor input { width:180px; max-width:55vw; padding:3px 6px; font-size:12px; }
+.speaker-editor button { padding:3px; border-color:transparent; background:transparent; box-shadow:none; }

@@ -2,6 +2,7 @@ import {
   defaultView,
   formatTime,
   needsReview,
+  speakerName,
   type Transcript,
   type TranscriptView,
   type Word,
@@ -21,6 +22,7 @@ export type DisplayRow = {
   id: string;
   kind: "turn" | "pause";
   speaker: string | null;
+  speakerLabel?: string;
   start: number | null;
   end: number | null;
   tokens: DisplayToken[];
@@ -37,20 +39,13 @@ export function pauseNotation(gap: number): string | null {
 export function turnTime(time: number | null): string {
   return formatTime(time);
 }
-export function speakerName(speaker: string | null) {
-  const match = speaker?.match(/^SPEAKER_(\d+)$/);
-  return match ? `Speaker ${Number(match[1]) + 1}` : speaker || "Speaker";
-}
+export { speakerName } from "./transcript";
 export function rowHeading(row: DisplayRow, view: TranscriptView) {
   if (row.kind === "pause") return "";
   const parts = [];
-  if (view.timestamps)
-    parts.push(
-      `[${turnTime(row.start)}${row.end !== null ? "–" + turnTime(row.end) : ""}]`,
-    );
-  if (view.speakers && row.kind === "turn")
-    parts.push(speakerName(row.speaker) + ":");
-  return parts.join(" ");
+  if (view.speakers) parts.push(row.speakerLabel ?? speakerName(row.speaker));
+  if (view.timestamps && row.start !== null) parts.push(turnTime(row.start));
+  return parts.join(" · ");
 }
 
 function alignedTurn(t: Transcript, w: Word, speaker: string | null) {
@@ -148,6 +143,7 @@ export function presentTranscript(
           id: `turn-${si}-${wi}`,
           kind: "turn",
           speaker,
+          speakerLabel: speakerName(speaker, t.speakerNames),
           start: w.start,
           end: w.end,
           tokens: [],

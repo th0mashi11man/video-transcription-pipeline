@@ -1,4 +1,4 @@
-import { decimalTime, videoFrameRates } from "./timecode";
+import { videoFrameRates } from "./timecode";
 
 export type Word = {
   text: string;
@@ -24,6 +24,7 @@ export type Transcript = {
   mediaName: string;
   segments: Segment[];
   speakerTurns?: { start: number; end: number; speaker: string }[];
+  speakerNames?: Record<string, string>;
   view?: TranscriptView;
 };
 
@@ -138,6 +139,11 @@ export function normalizeTranscript(
   ] as const) {
     if (typeof rawView[key] === "boolean") view[key] = rawView[key];
   }
+  const speakerNames = input.speakerNames && typeof input.speakerNames === "object" && !Array.isArray(input.speakerNames)
+    ? Object.fromEntries(Object.entries(input.speakerNames)
+        .filter((entry): entry is [string, string] => typeof entry[1] === "string" && !!entry[1].trim())
+        .map(([id, name]) => [id, name.trim().replace(/\s+/g, " ").slice(0, 80)]))
+    : {};
   return {
     version: 1,
     language: typeof input.language === "string" ? input.language : "Unknown",
@@ -147,6 +153,7 @@ export function normalizeTranscript(
       typeof input.mediaName === "string" ? input.mediaName : mediaName,
     segments,
     speakerTurns,
+    speakerNames,
     view,
   };
 }
@@ -170,10 +177,28 @@ export const needsReview = (w: Word, threshold: number) =>
 export const passageNeedsReview = (s: Segment, threshold: number) =>
   !s.reviewed &&
   (s.words.length ? s.words.some((w) => needsReview(w, threshold)) : true);
+/** Compact display only; source timings retain their original precision. */
 export const formatTime = (n: number | null) => {
-  if (n === null) return "Untimed";
-  return decimalTime(n);
+  if (n === null || !Number.isFinite(n) || n < 0) return "—";
+  const seconds = Math.floor(n);
+  const minutes = Math.floor(seconds / 60);
+  const ss = String(seconds % 60).padStart(2, "0");
+  return minutes < 60
+    ? `${minutes}:${ss}`
+    : `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}:${ss}`;
 };
+export function speakerName(speaker: string | null, names: Record<string, string> = {}) {
+  const key = speaker ?? "";
+  if (Object.hasOwn(names, key) && names[key]) return names[key];
+  const match = speaker?.match(/^SPEAKER_(\d+)$/);
+  return match ? `Speaker ${Number(match[1]) + 1}` : speaker || "Speaker";
+}
+export function renameSpeaker(t: Transcript, speaker: string | null, name: string): Transcript {
+  const clean = name.trim().replace(/\s+/g, " ");
+  if (!clean) throw new Error("Enter a speaker name.");
+  if (clean.length > 80) throw new Error("Use a speaker name of 80 characters or fewer.");
+  return { ...t, speakerNames: { ...t.speakerNames, [speaker ?? ""]: clean } };
+}
 export const subtitleTime = (n: number, separator = ",") => {
   const ms = Math.round(n * 1000);
   return `${Math.floor(ms / 3600000)
@@ -196,7 +221,7 @@ export function serializeTranscript(t: Transcript) {
 export function exportTranscript(t: Transcript, kind: "txt" | "srt" | "vtt") {
   if (kind === "txt")
     return t.segments
-      .map((s) => `${s.speaker ? s.speaker + ": " : ""}${segmentText(s)}`)
+      .map((s) => `${s.speaker || Object.hasOwn(t.speakerNames ?? {}, "") ? speakerName(s.speaker, t.speakerNames) + ": " : ""}${segmentText(s)}`)
       .join("\n\n");
   if (
     t.segments.some(

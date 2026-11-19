@@ -8,13 +8,15 @@ import {
 } from "./transcript";
 
 describe("transcript import and review", () => {
-  it("shows tenths of seconds and carries rounding through seconds, minutes, and hours", () => {
-    expect(formatTime(83.48)).toBe("00:01:23.5");
-    expect(formatTime(83.4)).toBe("00:01:23.4");
-    expect(formatTime(0.05)).toBe("00:00:00.1");
-    expect(formatTime(59.96)).toBe("00:01:00.0");
-    expect(formatTime(3599.96)).toBe("01:00:00.0");
-    expect(formatTime(null)).toBe("Untimed");
+  it("shows compact whole-second clocks without changing source precision", () => {
+    expect(formatTime(83.48)).toBe("1:23");
+    expect(formatTime(0.05)).toBe("0:00");
+    expect(formatTime(59.96)).toBe("0:59");
+    expect(formatTime(60)).toBe("1:00");
+    expect(formatTime(3599.96)).toBe("59:59");
+    expect(formatTime(3600)).toBe("1:00:00");
+    expect(formatTime(3661.8)).toBe("1:01:01");
+    expect(formatTime(null)).toBe("—");
   });
   it("defaults legacy or invalid InqScribe frame rates to 25 fps", () => {
     const legacy = normalizeTranscript({ segments: [] });

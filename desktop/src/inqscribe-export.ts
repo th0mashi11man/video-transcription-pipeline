@@ -13,7 +13,7 @@ export function transcriptInqScribe(
   return rows
     .map((row) => {
       const speaker =
-        view.speakers && row.kind === "turn" ? speakerName(row.speaker) : "";
+        view.speakers && row.kind === "turn" ? (row.speakerLabel ?? speakerName(row.speaker)) : "";
       return [
         time(row.start),
         time(row.end),
