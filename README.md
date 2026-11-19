@@ -4,7 +4,7 @@ A Mac app for creating and reviewing transcripts alongside audio or video, based
 
 ## Desktop app
 
-The interface follows macOS system appearance, with a native title bar, compact toolbar, recording sidebar, transcript, and optional review inspector. Open a recording, choose Transcribe, and select words to listen and correct them. Space plays or pauses; Command/Ctrl + S saves the project.
+The interface follows macOS system appearance, with a native title bar, compact toolbar, recording sidebar, transcript, and optional review inspector. Open a recording, choose Transcribe, and select words to listen and correct them. Space plays or pauses. Open…, Save, and Export… share a labelled toolbar group and the native File menu. Command + O opens a recording or project; Command + S saves the editable project; Command + Shift + E exports a copy.
 
 Choose the recording's language from the Language menu, or leave **Detect automatically** selected. The menu lists Whisper's supported languages by name; Cantonese appears for Large v3 and Turbo, whose tokenizers support it.
 
@@ -18,24 +18,32 @@ Use Pauses in the visible transcript controls to show or hide automatic Jefferso
 
 These are timing estimates from word boundaries, or passage boundaries in older imports. Listen to check them. The app does not infer breath, stress, intonation, or overlap notation. Turning pause display off does not alter source words or erase notation entered manually as text.
 
-The toolbar keeps all transcript controls visible: Speakers, Timestamps, and Pauses are grouped together; Uncertainty, Confidence, and Review marks form a review group; Follow playback controls scrolling. Search filters the transcript separately. Consecutive segments by the same speaker form one displayed turn. Timestamps use the same word boundaries as the pause timings. Original diarization is retained and used to avoid adding pause symbols across detected overlaps. Display settings and the confidence threshold are preserved in saved JSON projects.
+The toolbar keeps all transcript controls visible: Speakers, Timestamps, and Pauses are grouped together; Uncertainty, Confidence, and Review marks form a review group; Follow playback controls scrolling. Search filters the transcript separately. Consecutive segments by the same speaker form one displayed turn. Timestamps use the same word boundaries as the pause timings. Original diarization is retained and used to avoid adding pause symbols across detected overlaps. Display settings and the confidence threshold are preserved in saved `.tstudio` projects.
 
 Playback and transcript timestamps show tenths of a second, such as `00:01:23.5`. Word and TXT exports use the same precision. Original word timings retain their full precision for playback, corrections, and pause calculation.
 
+## Projects and files
+
+Each project has its own window. **Open…** accepts recordings, `.tstudio` projects, and older JSON transcripts. **Open Recent** and the empty window list reopen recent projects. Opening a project that is already open focuses its existing window.
+
+**Save** asks for a project name and location once, then updates that file. Changes autosave after the first save, including corrections, speaker information, transcript display settings, transcription choices, and a recording reference. Writes replace the project atomically; external changes produce an error rather than silently being overwritten. **File → Duplicate…** saves a separate project and opens it in another window. Unsaved changes are protected by Save / Don’t Save / Cancel when closing or quitting. Only one local transcription runs at a time across windows.
+
+Recordings are linked, not embedded. A recording inside the project’s folder is linked relatively, so the folder can be moved together. If the recording has moved elsewhere, use **Locate Recording…** beside the player. **Replace Recording…** changes the current recording without removing transcript edits. Legacy JSON imports become untitled projects until saved as `.tstudio`.
+
 ## Export
 
-Choose Export in the toolbar, then Word (.docx) or plain text (.txt). Both use the same turn and pause presentation as the screen. You can export the entire transcript or the current filtered view.
+Choose **Export…** in the toolbar or **File → Export As…**. On macOS, format, content, filename, and destination are chosen together in one native save sheet. Word (.docx) and plain text (.txt) create a separate copy and leave the project open. Both use the same turn and pause presentation as the screen. You can export the entire transcript or the current filtered view.
 
 - Speaker names and start/end timestamps in tenths of a second are included when visible.
 - Automatic pauses appear inline or on separate lines using the same rule as the screen.
 - Word preserves uncertainty shading and visible review marks.
 - TXT represents low-confidence text as `⟦word⟧`, missing scores as `⟦?word?⟧`, and visible review marks as `✓`.
 - Switching a display feature off also removes it from Word/TXT export.
-- Corrections are exported; original wording and model scores remain in the JSON project.
+- Corrections are exported; original wording and model scores remain in the editable project.
 
-SubRip and WebVTT are also available as caption formats. Caption export requires valid passage times. JSON projects do not embed media: attach the source recording after reopening a project. Multitoken corrections keep their original timing; they are not automatically realigned.
+SubRip and WebVTT are also available as caption formats. Caption export requires valid passage times. Projects reopen their linked recording automatically when it is available. Multitoken corrections keep their original timing; they are not automatically realigned.
 
-For InqScribe, choose **InqScribe (.txt)**. This format uses frame-based `HH:MM:SS.FF` timecodes required by the importer, with the video's frame rate detected by the installed local engine. For audio or unknown rates, choose **Frame rate** in the export sheet (default 25 fps); this setting is saved with the project. Fractional rates use non-drop numbering. In InqScribe, use **File → Import → Tab-delimited Text**, select the exported `.inqscribe.txt` file, and set **Imported Frame Rate** to the same rate chosen in the app.
+For InqScribe, choose **InqScribe (.txt)**. This format uses frame-based `HH:MM:SS.FF` timecodes required by the importer, with the video's frame rate detected by the installed local engine. For audio or unknown rates, choose **Frame rate** in the export sheet (default 25 fps); the export sheet initially uses the project’s frame rate. Fractional rates use non-drop numbering. In InqScribe, use **File → Import → Tab-delimited Text**, select the exported text file, and set **Imported Frame Rate** to the same rate chosen in the app.
 
 The file follows [InqScribe's four-field import format](https://docs.inqscribe.com/3.0/formats/tab-delimited-text/): start, end, speaker, transcript, without a header. It uses all turns or the current filtered view and respects display settings, including pauses, uncertainty markers, and review marks. Hidden or missing timestamps are left blank; no timing is invented. Pauses between speakers have an empty speaker field. Multiline text uses InqScribe's vertical-tab convention; tabs within text become spaces. Caption formats SRT and VTT retain the millisecond syntax required by their specifications.
 
@@ -130,4 +138,6 @@ npm run build
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-Tests cover legacy transcript import, source safety, speaker assignment, confidence propagation, cache readiness, view persistence, pause thresholds and placement, untimed words, and matching Word/TXT content and formatting. macOS packaging checks deliberately invalidate a real helper binary, repair it, verify extracted ZIP signatures and launch its executable, and ensure that changes after signing are rejected. Word output is additionally rendered for visual review. The upstream example transcripts remain importable.
+Tests cover project round trips, queued autosaves, atomic project replacement, external-change protection, movable recording links, legacy transcript import, source safety, speaker assignment, confidence propagation, cache readiness, view persistence, pause thresholds and placement, untimed words, and matching Word/TXT content and formatting. macOS packaging checks deliberately invalidate a real helper binary, repair it, verify extracted ZIP signatures and launch its executable, and ensure that changes after signing are rejected. Word output is additionally rendered for visual review. The upstream example transcripts remain importable.
+
+For a native macOS export-sheet check, run `cargo run --manifest-path desktop/src-tauri/Cargo.toml --example export-sheet-check -- "Export check" docx --automatic` from the repository root. It checks all format filters and the scope/frame-rate controls in the actual Mac sheet, then closes without writing a file. Omit `--automatic` to select a destination and inspect the returned export choice manually.

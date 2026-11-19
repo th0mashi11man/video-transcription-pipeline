@@ -4302,15 +4302,20 @@ dependencies = [
 
 [[package]]
 name = "transcript-studio"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
+ "block2",
  "keyring",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
+ "tempfile",
 ]
 
 [[package]]

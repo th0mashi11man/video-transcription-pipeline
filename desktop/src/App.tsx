@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { makeProject, readProject, SaveQueue, type RecentProject } from "./project";
 import { open, save, confirm } from "@tauri-apps/plugin-dialog";
 import {
   AudioLines,
@@ -27,7 +29,6 @@ import {
   needsReview,
   normalizeTranscript,
   segmentText,
-  serializeTranscript,
   type Transcript,
   type TranscriptView,
   defaultView,
@@ -79,6 +80,14 @@ const mediaExtensions = [
 ];
 
 export default function App() {
+  const [projectPath, setProjectPath] = useState<string | null>(null);
+  const [recordingLink, setRecordingLink] = useState<{ path: string; name: string } | null>(null);
+  const [recents, setRecents] = useState<RecentProject[]>([]);
+  const [saving, setSaving] = useState(false);
+  const savedFile = useRef<{ path: string; revision: string } | null>(null);
+  const saves = useRef(new SaveQueue());
+  const modal = useRef(false);
+  const closing = useRef(false);
   const [view, setView] = useState<TranscriptView>({ ...defaultView });
   const [showInspector, setShowInspector] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -176,37 +185,39 @@ export default function App() {
       }
     };
     window.addEventListener("beforeunload", handler);
-    let dispose: (() => void) | undefined;
-    let disposed = false;
-    if (native)
-      import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-        getCurrentWindow()
-          .onCloseRequested(async (event) => {
-            if (!(dirty || busy)) return;
-            event.preventDefault();
-            if (
-              await confirm(
-                busy
-                  ? "Cancel transcription and close?"
-                  : "Close without saving your edits?",
-                { title: "Transcript Studio", kind: "warning" },
-              )
-            ) {
-              if (busy) await invoke("cancel_transcription");
-              await getCurrentWindow().destroy();
-            }
-          })
-          .then((unlisten) => {
-            if (disposed) unlisten();
-            else dispose = unlisten;
-          });
-      });
-    return () => {
-      disposed = true;
-      dispose?.();
-      window.removeEventListener("beforeunload", handler);
-    };
+    return () => window.removeEventListener("beforeunload", handler);
   }, [dirty, busy]);
+  const actions = useRef({ open: () => {}, save: () => {}, duplicate: () => {}, export: () => {}, close: async () => {}, openPath: (_path: string) => {} });
+  useEffect(() => {
+    if (!native) return;
+    let stopped = false;
+    const disposers: (() => void)[] = [];
+    const add = (dispose: () => void) => { if (stopped) dispose(); else disposers.push(dispose); };
+    void (async () => {
+      add(await listen<string>("file-command", ({ payload }) => {
+        if (payload === "open") actions.current.open();
+        if (payload === "save") actions.current.save();
+        if (payload === "duplicate") actions.current.duplicate();
+        if (payload === "export") actions.current.export();
+      }));
+      add(await listen<string>("open-path", ({ payload }) => actions.current.openPath(payload)));
+      const refresh = () => invoke<RecentProject[]>("recent_projects").then((items) => { if (!stopped) setRecents(items); });
+      add(await listen("recents-changed", () => void refresh()));
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      add(await getCurrentWindow().onCloseRequested((event) => { event.preventDefault(); void actions.current.close(); }));
+      add(await getCurrentWindow().onFocusChanged(() => { void syncDocument().catch((e) => setError(message(e))); }));
+      await refresh();
+      const initial = await invoke<string | null>("window_bootstrap");
+      if (initial && !stopped) { if (initial === "__open_dialog__") actions.current.open(); else actions.current.openPath(initial); }
+    })().catch((e) => setError(message(e)));
+    return () => { stopped = true; disposers.forEach((dispose) => dispose()); };
+  }, []);
+  useEffect(() => {
+    if (!native || !projectPath || !dirty || sample || closing.current) return;
+    const timer = window.setTimeout(() => { if (!closing.current) void persistProject(false); }, 900);
+    return () => window.clearTimeout(timer);
+  }, [projectPath, dirty, transcript, media, view, model, language, speakers, followPlayback]);
+  useEffect(() => { if (native) void syncDocument().catch((e) => setError(message(e))); }, [projectPath, media, transcript, dirty, busy, saving]);
   useEffect(() => {
     if (!busy) return;
     let stopped = false;
@@ -289,6 +300,7 @@ export default function App() {
     );
   }
   async function chooseMedia() {
+    if (modal.current) return;
     setError("");
     if (sample && !(await discard())) return;
     if (!native) {
@@ -314,6 +326,8 @@ export default function App() {
   }
   function attachMedia(next: Media) {
     setMedia(next);
+    setRecordingLink(next.path ? {path: next.path, name: next.name} : null);
+    revision.current++; setDirty(true);
     if (
       transcript &&
       !sample &&
@@ -328,12 +342,14 @@ export default function App() {
       setTranscript(null);
       setSelected(null);
       setSample(false);
-      setDirty(false);
+      setDirty(true);
     }
   }
   async function loadTranscript(raw: unknown) {
     try {
-      const parsed = normalizeTranscript(raw, media?.name);
+      const project = readProject(raw);
+      const parsed = project.transcript;
+      if (!parsed) throw new Error("Open this project in the desktop app to use its recording.");
       if (!(await discard())) return;
       player.current?.pause();
       clip.current = null;
@@ -347,7 +363,7 @@ export default function App() {
       setThreshold(parsed.view?.confidenceThreshold ?? 0.8);
       setSelected(null);
       setSample(false);
-      setDirty(false);
+      setDirty(true);
       revision.current++;
       setNotice(media ? "Transcript opened." : "Open its recording to listen.");
       setError("");
@@ -355,23 +371,107 @@ export default function App() {
       setError(message(e));
     }
   }
-  async function chooseTranscript() {
-    if (!native) {
-      jsonInput.current?.click();
-      return;
-    }
+  async function chooseOpen() {
+    if (modal.current) return;
+    if (!native) { jsonInput.current?.click(); return; }
+    modal.current = true;
     try {
-      const path = await open({
-        multiple: false,
-        filters: [{ name: "Transcript JSON", extensions: ["json"] }],
-      });
-      if (typeof path === "string")
-        await loadTranscript(
-          JSON.parse(await invoke<string>("read_transcript", { path })),
-        );
-    } catch (e) {
-      setError(message(e));
-    }
+      const path = await open({ title: "Open", multiple: false, filters: [
+        { name: "Projects and recordings", extensions: ["tstudio", "json", ...mediaExtensions] },
+        { name: "Transcript Studio projects", extensions: ["tstudio", "json"] },
+        { name: "Audio and video", extensions: mediaExtensions },
+      ] });
+      if (typeof path === "string") await openPath(path);
+    } catch (e) { setError(message(e)); }
+    finally { modal.current = false; }
+  }
+  async function openPath(path: string) {
+    try {
+      if (transcript || media || recordingLink) {
+        await invoke("new_project_window", { path });
+        return;
+      }
+      if (!/\.(tstudio|json)$/i.test(path)) {
+        const canonical = await invoke<string>("open_media", { path });
+        attachMedia({ path: canonical, url: convertFileSrc(canonical), name: canonical.split(/[\\/]/).pop()!, audio: /\.(mp3|m4a|wav|flac|ogg|aac|opus)$/i.test(canonical) });
+        return;
+      }
+      const loaded = await invoke<{content: string; path: string; revision: string; recordingPath: string | null; recordingExists: boolean}>("read_project", { path });
+      const project = readProject(JSON.parse(loaded.content));
+      setTranscript(project.transcript);
+      setView(project.view); setThreshold(project.view.confidenceThreshold);
+      priorOptions.current = JSON.stringify([project.options.model, project.options.language, project.options.speakers, project.options.followPlayback]);
+      setModel(project.options.model); setLanguage(project.options.language);
+      setSpeakers(project.options.speakers); setFollowPlayback(project.options.followPlayback);
+      setSelected(null); setSample(false); setDirty(project.legacy); setQuery("");
+      setMedia(null);
+      setRecordingLink(loaded.recordingPath ? { path: loaded.recordingPath, name: project.recording!.name } : null);
+      if (!project.legacy) { savedFile.current = { path: loaded.path, revision: loaded.revision }; setProjectPath(loaded.path); }
+      if (loaded.recordingPath && loaded.recordingExists) {
+        const canonical = await invoke<string>("open_media", { path: loaded.recordingPath });
+        setMedia({ path: canonical, url: convertFileSrc(canonical), name: project.recording!.name, audio: /\.(mp3|m4a|wav|flac|ogg|aac|opus)$/i.test(canonical) });
+      }
+      revision.current++;
+      setError("");
+    } catch (e) { setError(message(e)); }
+  }
+  const snapshot = useRef({ transcript, media, recordingLink, view, model, language, speakers, followPlayback, dirty, sample, busy });
+  snapshot.current = { transcript, media, recordingLink, view, model, language, speakers, followPlayback, dirty, sample, busy };
+  function projectContent() {
+    const s = snapshot.current;
+    return JSON.stringify(makeProject(s.transcript, s.media?.path ? {path:s.media.path, name:s.media.name} : s.recordingLink, s.view,
+      {model:s.model, language:s.language, speakers:s.speakers, followPlayback:s.followPlayback}), null, 2);
+  }
+  async function persistProject(chooseLocation = true, duplicate = false): Promise<boolean> {
+    return saves.current.run(async () => {
+      if (!snapshot.current.transcript && !snapshot.current.media && !snapshot.current.recordingLink) return false;
+      let path = duplicate ? null : savedFile.current?.path;
+      try {
+        if (!path) {
+          if (!chooseLocation || modal.current) return false;
+          modal.current = true;
+          try { path = await save({ title: duplicate ? "Duplicate Project" : "Save Project", defaultPath: `${projectName}${duplicate ? " copy" : ""}.tstudio`, filters: [{ name: "Transcript Studio project", extensions: ["tstudio"] }] }); }
+          finally { modal.current = false; }
+          if (!path) return false;
+        }
+        setSaving(true);
+        const rev = revision.current;
+        const result = await invoke<{path: string; revision: string}>("write_project", {
+          path, content: projectContent(), expectedRevision: duplicate ? null : savedFile.current?.revision ?? null, duplicate,
+        });
+        if (duplicate) { await invoke("new_project_window", {path: result.path}); }
+        else {
+          savedFile.current = result; setProjectPath(result.path);
+          if (rev === revision.current) setDirty(false);
+        }
+        setError("");
+        return true;
+      } catch (e) { setError(message(e)); return false; }
+      finally { setSaving(false); }
+    });
+  }
+  async function closeDocument() {
+    if (closing.current) return;
+    closing.current = true;
+    try {
+      if (modal.current || exportBusy) { await invoke("cancel_quit"); return; }
+      if (busy && !(await confirm("Cancel transcription and close this project?", { title: "Transcript Studio", kind: "warning" }))) { await invoke("cancel_quit"); return; }
+      if (snapshot.current.dirty) {
+        const choice = await invoke<string>("confirm_close", {title: projectName});
+        if (choice === "cancel" || (choice === "save" && !(await persistProject()))) { await invoke("cancel_quit"); return; }
+      }
+      // Wait for an already-started autosave before destroying the window.
+      await saves.current.run(async () => {});
+      if (busy) await invoke("cancel_transcription");
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().destroy();
+    } catch (e) { setError(message(e)); await invoke("cancel_quit"); }
+    finally { closing.current = false; }
+  }
+  async function syncDocument() {
+    const s = snapshot.current;
+    const title = (savedFile.current?.path.split(/[\\/]/).pop()?.replace(/\.tstudio$/i, "") || s.media?.name.replace(/\.[^.]+$/, "") || s.transcript?.mediaName.replace(/\.[^.]+$/, "") || "Untitled") + " — Transcript Studio";
+    await invoke("document_state", { occupied: !!(s.transcript || s.media || s.recordingLink), canExport: !!s.transcript && !s.busy, title, edited: s.dirty });
   }
   async function writeFile(
     content: string | Uint8Array,
@@ -423,21 +523,8 @@ export default function App() {
     return true;
   }
   async function saveTranscript() {
-    if (!transcript) return;
-    const rev = revision.current;
-    try {
-      if (
-        await writeFile(
-          JSON.stringify(serializeTranscript({ ...transcript, view }), null, 2),
-          "json",
-        )
-      ) {
-        if (rev === revision.current) setDirty(false);
-        setNotice("Saved.");
-      }
-    } catch (e) {
-      setError(message(e));
-    }
+    if (native) { await persistProject(); return; }
+    if (await writeFile(projectContent(), "tstudio", "project")) setDirty(false);
   }
   function select(segment: number, word: number | null) {
     const s = transcript!.segments[segment];
@@ -549,7 +636,7 @@ export default function App() {
     );
   }
   async function transcribe() {
-    if (!native || !media?.path || !(await discard())) return;
+    if (!native || !media?.path || (transcript && !(await discard()))) return;
     setError("");
     setNotice("");
     try {
@@ -574,6 +661,7 @@ export default function App() {
     ) ?? -1;
   const currentConfidence = currentWord?.confidence;
   const projectName = (
+    projectPath?.split(/[\\/]/).pop() ||
     transcript?.mediaName ||
     media?.name ||
     "Untitled"
@@ -597,11 +685,11 @@ export default function App() {
       const editing =
         ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) ||
         target.isContentEditable;
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "o") {
+      if (!native && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "o") {
         event.preventDefault();
-        if (!busy) { if (event.shiftKey) void chooseTranscript(); else void chooseMedia(); }
+        void chooseOpen();
       } else if (
-        (event.metaKey || event.ctrlKey) &&
+        !native && (event.metaKey || event.ctrlKey) &&
         event.key.toLowerCase() === "s"
       ) {
         event.preventDefault();
@@ -685,32 +773,49 @@ export default function App() {
     value: TranscriptView[K],
   ) {
     setView((old) => ({ ...old, [key]: value }));
-    if (transcript) {
+    if (transcript || media || recordingLink) {
       revision.current++;
       setDirty(true);
     }
   }
-  async function performExport() {
+  const optionKey = JSON.stringify([model, language, speakers, followPlayback]);
+  const priorOptions = useRef(optionKey);
+  useEffect(() => {
+    if (priorOptions.current !== optionKey) {
+      priorOptions.current = optionKey;
+      if (transcript || media || recordingLink) { revision.current++; setDirty(true); }
+    }
+  }, [optionKey]);
+  async function chooseExport() {
+    if (!transcript || busy || modal.current) return;
+    if (!native || !navigator.platform.includes("Mac")) { setExportOpen(true); return; }
+    modal.current = true;
+    try {
+      const choice = await invoke<{path: string; kind: typeof exportKind; scope: typeof exportScope; frameRate: number} | null>("export_panel", {name: projectName, kind: exportKind, scope: exportScope, frameRate: view.frameRate});
+      if (!choice) return;
+      setExportKind(choice.kind); setExportScope(choice.scope);
+      await performExport(choice);
+    } catch (e) { setError(message(e)); }
+    finally { modal.current = false; }
+  }
+  actions.current = { open: () => void chooseOpen(), save: () => void saveTranscript(), duplicate: () => void persistProject(true, true), export: () => void chooseExport(), close: closeDocument, openPath: (path) => void openPath(path) };
+  async function performExport(choice?: {path: string; kind: typeof exportKind; scope: typeof exportScope; frameRate: number}) {
     if (!transcript) return;
     setExportBusy(true);
     setError("");
     try {
-      const outputRows = exportScope === "visible" ? shownRows : rows;
-      const content =
-        exportKind === "docx"
-          ? await transcriptDocx(projectName, outputRows, view)
-          : exportKind === "txt"
-            ? rowsToText(outputRows, view)
-            : exportKind === "inqscribe"
-              ? transcriptInqScribe(outputRows, view)
-              : exportTranscript(transcript, exportKind);
-      if (
-        await writeFile(
-          content,
-          exportKind === "inqscribe" ? "txt" : exportKind,
-          exportKind === "inqscribe" ? "inqscribe" : "reviewed",
-        )
-      ) {
+      const kind = choice?.kind ?? exportKind;
+      const scope = choice?.scope ?? exportScope;
+      const exportView = {...view, frameRate: choice?.frameRate ?? view.frameRate};
+      const outputRows = scope === "visible" ? shownRows : rows;
+      const content = kind === "docx" ? await transcriptDocx(projectName, outputRows, exportView)
+        : kind === "txt" ? rowsToText(outputRows, exportView)
+        : kind === "inqscribe" ? transcriptInqScribe(outputRows, exportView)
+        : exportTranscript(transcript, kind);
+      if (choice) {
+        await invoke(typeof content === "string" ? "write_document" : "write_word_document", {path:choice.path, content: typeof content === "string" ? content : Array.from(content)});
+      }
+      if (choice || await writeFile(content, kind === "inqscribe" ? "txt" : kind, kind === "inqscribe" ? "inqscribe" : "reviewed")) {
         setExportOpen(false);
         setNotice("Exported.");
       }
@@ -741,41 +846,21 @@ export default function App() {
       className={`mac-app ${native && navigator.platform.includes("Mac") ? "native-mac" : ""}`}
     >
       <header className="mac-toolbar" data-tauri-drag-region>
-        <div className="toolbar-actions" role="group" aria-label="Project actions">
-          <button
-            title="Open project (⌘⇧O)"
-            aria-label="Open transcript"
-            disabled={busy}
-            onClick={chooseTranscript}
-          >
-            <FolderOpen size={18} />
+        <div className="toolbar-actions file-actions" role="group" aria-label="File">
+          <button title="Open project or recording (⌘O)" onClick={chooseOpen}><FolderOpen size={16} />Open…</button>
+          <button title="Save project (⌘S)" disabled={!(transcript || media || recordingLink) || saving} onClick={saveTranscript}>
+            {saving ? <LoaderCircle size={16} className="spin" /> : <Save size={16} />}Save
           </button>
-          <button
-            title="Save project (⌘S)"
-            aria-label="Save project"
-            disabled={!transcript || busy}
-            onClick={saveTranscript}
-          >
-            <Save size={18} />
-          </button>
+          <button title="Export a copy (⌘⇧E)" disabled={!transcript || busy || exportBusy} onClick={chooseExport}><SquareArrowUp size={16} />Export…</button>
         </div>
         <div className="document-title" data-tauri-drag-region
-          title={transcript?.mediaName || media?.name || "Untitled"}>
+          title={projectPath || projectName}>
           <FileText size={14} className="document-icon" aria-hidden="true" />
           <h1 data-tauri-drag-region>{projectName}</h1>
           {dirty && <span className="document-state">Edited</span>}
           {sample && <span className="sample-badge">Sample</span>}
         </div>
         <div className="toolbar-actions">
-          <button
-            title="Export transcript"
-            aria-label="Export transcript"
-            disabled={!transcript || busy}
-            onClick={() => setExportOpen(true)}
-          >
-            <SquareArrowUp size={19} />
-          </button>
-          <span className="toolbar-separator" />
           <button
             title="Inspector"
             aria-label="Toggle inspector"
@@ -867,14 +952,7 @@ export default function App() {
         <aside className="source-sidebar" aria-label="Recording">
           <div className="section-header">
             <h2>Recording</h2>
-            <button
-              title="Change recording"
-              aria-label="Choose a different recording"
-              disabled={busy}
-              onClick={chooseMedia}
-            >
-              <FolderOpen size={15} />
-            </button>
+            {(media || transcript || recordingLink) && <button className="link recording-action" disabled={busy} onClick={chooseMedia}>{media ? "Replace Recording…" : "Locate Recording…"}</button>}
           </div>
           <div className={`media-player ${media?.audio ? "audio" : ""}`}>
             {media ? (
@@ -929,12 +1007,14 @@ export default function App() {
                 )}
               </>
             ) : (
-              <button className="open-recording" onClick={chooseMedia}>
-                <FolderOpen size={31} strokeWidth={1.2} />
-                <span>Open recording…</span>
-              </button>
+              <div className="recording-placeholder">
+                <AudioLines size={31} strokeWidth={1.2} />
+                <span>{recordingLink?.name || (transcript ? transcript.mediaName : "No recording")}</span>
+                {(recordingLink || transcript) && <span className="footnote">Recording unavailable</span>}
+              </div>
             )}
           </div>
+          {media && !media.audio && <p className="recording-name" title={media.path || media.name}>{media.name}</p>}
           <div className="transport">
             <button
               aria-label="Back 3 seconds"
@@ -1125,11 +1205,10 @@ export default function App() {
                 ) : (
                   <>
                     <FileText size={38} strokeWidth={1} />
-                    <p>Open a recording or transcript.</p>
-                    <button onClick={chooseTranscript}>Open transcript…</button>
-                    <button className="link" onClick={showSample}>
-                      Sample
-                    </button>
+                    <p>{media ? "Ready to transcribe" : "Open a project or recording"}</p>
+                    {!media && !recordingLink && <button className="primary" onClick={chooseOpen}>Open…</button>}
+                    {!media && !recordingLink && recents.length > 0 && <div className="recent-projects" aria-label="Recent projects">{recents.slice(0,5).map((item) => <button className="link" key={item.path} title={item.path} onClick={() => void openPath(item.path)}>{item.name}</button>)}</div>}
+                    {!media && !recordingLink && <button className="link" onClick={showSample}>Sample</button>}
                   </>
                 )}
               </div>
@@ -1396,7 +1475,7 @@ export default function App() {
               <button
                 className="primary"
                 disabled={exportBusy}
-                onClick={performExport}
+                onClick={() => void performExport()}
               >
                 {exportBusy ? "Exporting…" : "Export"}
               </button>
@@ -1424,13 +1503,14 @@ export default function App() {
         ref={jsonInput}
         type="file"
         hidden
-        accept=".json,application/json"
+        accept=".tstudio,.json,audio/*,video/*"
         onChange={async (e) => {
           const file = e.target.files?.[0];
           e.target.value = "";
           if (file) {
             try {
-              await loadTranscript(JSON.parse(await file.text()));
+              if (/\.(json|tstudio)$/i.test(file.name)) await loadTranscript(JSON.parse(await file.text()));
+              else attachMedia({name:file.name, url:URL.createObjectURL(file), audio:file.type.startsWith("audio/")});
             } catch (err) {
               setError(message(err));
             }

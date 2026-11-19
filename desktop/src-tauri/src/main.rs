@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod documents;
 mod engine;
+mod export_panel;
 
 use serde::Serialize;
 use std::{
@@ -10,7 +12,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State, WebviewWindow};
 use tauri_plugin_opener::OpenerExt;
 
 fn run_step(
@@ -99,9 +101,36 @@ impl Default for Job {
     }
 }
 #[derive(Clone, Default)]
-struct AppState {
+struct Session {
     job: Arc<Mutex<Job>>,
     media: Arc<Mutex<Option<PathBuf>>>,
+}
+
+#[derive(Default)]
+struct AppState {
+    sessions: Mutex<std::collections::HashMap<String, Session>>,
+}
+impl AppState {
+    fn session(&self, label: &str) -> Result<Session, String> {
+        Ok(self
+            .sessions
+            .lock()
+            .map_err(|e| e.to_string())?
+            .entry(label.into())
+            .or_default()
+            .clone())
+    }
+}
+fn stop_job(session: &Session) {
+    if let Ok(mut job) = session.job.lock() {
+        if let Some(mut child) = job.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        if job.status == "running" {
+            job.status = "cancelled".into();
+        }
+    }
 }
 
 fn capture_log(
@@ -220,8 +249,10 @@ fn open_setup_page(app: tauri::AppHandle, page: String) -> Result<(), String> {
 fn open_media(
     app: tauri::AppHandle,
     state: State<AppState>,
+    window: WebviewWindow,
     path: PathBuf,
 ) -> Result<String, String> {
+    let state = state.session(window.label())?;
     let canonical = path.canonicalize().map_err(|e| e.to_string())?;
     if !canonical.is_file() {
         return Err("Choose a media file.".into());
@@ -237,7 +268,9 @@ fn open_media(
 async fn media_frame_rate(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
+    window: WebviewWindow,
 ) -> Result<Option<f64>, String> {
+    let state = state.session(window.label())?;
     let media = state.media.lock().map_err(|e| e.to_string())?.clone();
     let Some(media) = media else { return Ok(None) };
     let resources = app.path().resource_dir().map_err(|e| e.to_string())?;
@@ -323,12 +356,26 @@ fn write_word_document(path: PathBuf, content: Vec<u8>) -> Result<(), String> {
 fn start_transcription(
     app: tauri::AppHandle,
     state: State<AppState>,
+    window: WebviewWindow,
     media_path: PathBuf,
     python: Option<String>,
     model: String,
     language: Option<String>,
     speakers: bool,
 ) -> Result<(), String> {
+    // One GPU job at a time also protects first-use installation from concurrent writes.
+    let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+    if sessions.iter().any(|(label, session)| {
+        label != window.label()
+            && session
+                .job
+                .lock()
+                .map(|j| j.status == "running")
+                .unwrap_or(true)
+    }) {
+        return Err("A transcription is running in another project. Wait for it to finish or cancel it first.".into());
+    }
+    let state = sessions.get(window.label()).cloned().unwrap_or_default();
     let media_path = media_path.canonicalize().map_err(|e| e.to_string())?;
     if state.media.lock().map_err(|e| e.to_string())?.as_ref() != Some(&media_path) {
         return Err("Open this recording in the app before transcribing it.".into());
@@ -484,7 +531,11 @@ fn start_transcription(
     Ok(())
 }
 #[tauri::command]
-fn transcription_status(state: State<AppState>) -> Result<JobStatus, String> {
+fn transcription_status(
+    state: State<AppState>,
+    window: WebviewWindow,
+) -> Result<JobStatus, String> {
+    let state = state.session(window.label())?;
     let job = state.job.lock().map_err(|e| e.to_string())?;
     let mut log = String::new();
     let mut result = None;
@@ -514,7 +565,8 @@ fn transcription_status(state: State<AppState>) -> Result<JobStatus, String> {
     })
 }
 #[tauri::command]
-fn cancel_transcription(state: State<AppState>) -> Result<(), String> {
+fn cancel_transcription(state: State<AppState>, window: WebviewWindow) -> Result<(), String> {
+    let state = state.session(window.label())?;
     let mut job = state.job.lock().map_err(|e| e.to_string())?;
     if let Some(mut child) = job.child.take() {
         let _ = child.kill();
@@ -579,9 +631,76 @@ fn main() {
     }
     tauri::Builder::default()
         .manage(AppState::default())
+        .manage(documents::Documents::default())
+        .setup(|app| {
+            documents::install_menu(app.handle())?;
+            Ok(())
+        })
+        .on_menu_event(|app, event| {
+            let id = event.id().as_ref();
+            if id == "new" {
+                let _ = documents::new_project_window(app.clone(), None);
+            } else if id == "quit" {
+                *app.state::<documents::Documents>().quitting.lock().unwrap() = true;
+                documents::close_next(app);
+            } else if id == "clear-recents" {
+                let _ = documents::clear_recent_projects(app.clone());
+            } else if let Some(index) = id
+                .strip_prefix("recent-")
+                .and_then(|v| v.parse::<usize>().ok())
+            {
+                // Opening through the frontend reuses an empty window and creates a new one for an occupied document.
+                if let Some(item) = documents::recent(app).get(index) {
+                    if let Some(w) = app
+                        .webview_windows()
+                        .values()
+                        .find(|w| w.is_focused().unwrap_or(false))
+                    {
+                        let _ = w.emit("open-path", &item.path);
+                    } else {
+                        let _ = documents::new_project_window(app.clone(), Some(item.path.clone()));
+                    }
+                }
+            } else if let Some(w) = app
+                .webview_windows()
+                .values()
+                .find(|w| w.is_focused().unwrap_or(false))
+            {
+                let _ = w.emit("file-command", id);
+            } else if id == "open" {
+                let _ = documents::new_project_window(app.clone(), Some("__open_dialog__".into()));
+            }
+        })
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                let app = window.app_handle();
+                if let Ok(mut sessions) = app.state::<AppState>().sessions.lock() {
+                    if let Some(session) = sessions.remove(window.label()) {
+                        stop_job(&session);
+                    }
+                }
+                if let Ok(mut docs) = app.state::<documents::Documents>().windows.lock() {
+                    docs.remove(window.label());
+                }
+                if *app.state::<documents::Documents>().quitting.lock().unwrap() {
+                    documents::close_next(app);
+                } else if app.webview_windows().len() <= 1 {
+                    documents::update_menu(app, false, false);
+                }
+            }
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            documents::recent_projects,
+            documents::new_project_window,
+            documents::document_state,
+            documents::window_bootstrap,
+            documents::read_project,
+            documents::write_project,
+            documents::confirm_close,
+            documents::cancel_quit,
+            export_panel::export_panel,
             token_status,
             credential_status,
             save_token,
@@ -600,8 +719,70 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("Unable to build Transcript Studio")
         .run(|app, event| {
-            if matches!(event, tauri::RunEvent::Exit) {
-                let _ = cancel_transcription(app.state::<AppState>());
+            match event {
+                tauri::RunEvent::ExitRequested { api, code, .. } => {
+                    let docs = app.state::<documents::Documents>();
+                    let finished_quitting =
+                        *docs.quitting.lock().unwrap() && docs.windows.lock().unwrap().is_empty();
+                    if code.is_none() {
+                        // Closing the last document leaves the Mac app available in the Dock.
+                        api.prevent_exit();
+                    } else if !finished_quitting && !app.webview_windows().is_empty() {
+                        // Dock and system Quit requests protect documents just like Command-Q.
+                        api.prevent_exit();
+                        *docs.quitting.lock().unwrap() = true;
+                        documents::close_next(app);
+                    }
+                }
+                tauri::RunEvent::Exit => {
+                    if let Ok(sessions) = app.state::<AppState>().sessions.lock() {
+                        for session in sessions.values() {
+                            stop_job(session);
+                        }
+                    }
+                }
+                #[cfg(target_os = "macos")]
+                tauri::RunEvent::Opened { urls } => {
+                    for url in urls {
+                        if let Ok(path) = url.to_file_path() {
+                            let _ = documents::route_open(app, path.to_string_lossy().into_owned());
+                        }
+                    }
+                }
+                #[cfg(target_os = "macos")]
+                tauri::RunEvent::Reopen {
+                    has_visible_windows: false,
+                    ..
+                } => {
+                    if app.webview_windows().is_empty() {
+                        let _ = documents::new_project_window(app.clone(), None);
+                    } else if let Some(window) = app.webview_windows().values().next() {
+                        let _ = window.unminimize();
+                        let _ = window.set_focus();
+                    }
+                }
+                _ => {}
             }
         });
+}
+
+#[cfg(test)]
+mod document_session_tests {
+    use super::*;
+    #[test]
+    fn recordings_and_jobs_are_isolated_between_project_windows() {
+        let state = AppState::default();
+        let first = state.session("main").unwrap();
+        let second = state.session("project-2").unwrap();
+        *first.media.lock().unwrap() = Some(PathBuf::from("first.wav"));
+        first.job.lock().unwrap().status = "running".into();
+        assert!(second.media.lock().unwrap().is_none());
+        assert_eq!(second.job.lock().unwrap().status, "idle");
+        assert_eq!(
+            state.session("main").unwrap().job.lock().unwrap().status,
+            "running"
+        );
+        stop_job(&second);
+        assert_eq!(first.job.lock().unwrap().status, "running");
+    }
 }
