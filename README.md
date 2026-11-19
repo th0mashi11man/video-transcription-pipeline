@@ -53,7 +53,7 @@ The installer manifest is versioned by its content and architecture. Dependency 
 
 ## Development
 
-Requirements: Node.js 22.12+, Rust, [uv](https://docs.astral.sh/uv/), and the [Tauri macOS prerequisites](https://v2.tauri.app/start/prerequisites/). Current distributed builds target Apple Silicon Macs running macOS 14 or later. Signing and notarization are not configured.
+Requirements: Node.js 22.12+, Rust, [uv](https://docs.astral.sh/uv/), and the [Tauri macOS prerequisites](https://v2.tauri.app/start/prerequisites/). Current distributed builds target Apple Silicon Macs running macOS 14 or later. Shared builds receive free local ad hoc signatures; no Apple Developer certificate or notarization service is used.
 
 ```bash
 uv sync --python 3.12 --extra speakers --extra dev
@@ -70,7 +70,7 @@ A build without an included credential:
 
 ```bash
 cd desktop
-npm run build:portable -- --debug
+npm run build:portable
 ```
 
 This packages the first-use downloader and engine manifest. A build without an included credential requires a previously saved Keychain credential. Provision it with the binary's `--store-token-stdin` command, which reads the token from standard input, and accept the conditions for [speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1) and [segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0). The interface has no Settings menu. Speaker detection can be disabled explicitly.
@@ -79,14 +79,26 @@ A private build for the intended small group:
 
 ```bash
 cd desktop
-npm run build:private -- --debug
+npm run build:private
 ```
 
 It reads the app's saved Keychain credential and includes it in the app, so recipients need no account setup. `UV_BIN` may point to the local uv executable. Other build environments can provide `TRANSCRIPT_STUDIO_HF_TOKEN` through a secret manager. Never put the token in a shell command or tracked file.
 
 The temporary credential is generated under the ignored `desktop/src-tauri/.private/` directory and removed after packaging. A recipient can extract a token included in an app; share that artifact only with its intended recipients. Do not upload private bundles or installers to GitHub. Source checks reject recognizable Hugging Face tokens and private artifacts in tracked files and report file names only. Native and private resources are blocked from the preview server.
 
-The app is built at `desktop/src-tauri/target/debug/bundle/macos/Transcript Studio.app`. Omit `--debug` for a release build. Standard direct `tauri build` remains a development build using an external Python environment; use the portable/private packaging scripts for recipients.
+The release app is built at `desktop/src-tauri/target/release/bundle/macos/Transcript Studio.app`. The packaging script signs the thinned downloader, builds the app, signs the final helper and complete app in that order, and runs strict recursive signature verification. It then copies the app and [first-launch guide](desktop/distribution/First%20launch.txt) into a ZIP, extracts it again, and verifies the delivered signatures. Any failed check stops packaging. Ad hoc signing never calls Apple's notarization service, and Apple signing/notarization credentials are excluded from the build environment.
+
+The private Apple Silicon archive is `output/Transcript Studio-private-arm64.zip`, with a SHA-256 checksum alongside it. It contains a `Transcript Studio` folder with the app and `Read Me - First launch.txt`. Share the whole ZIP privately. Public builds omit `-private` from the archive name. `--debug` is still available for development and produces a separate `-debug.zip`; use the default release build for recipients. Direct `tauri build` does not run these distribution checks; use the portable/private packaging scripts for sharing.
+
+### Opening a privately shared copy
+
+The recipient should quit the old version, unzip the download, and move **Transcript Studio.app** into **Applications**. Because this build is not notarized, they must deliberately approve their downloaded copy. The included guide gives this one-time Terminal command:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Transcript Studio.app"
+```
+
+This removes quarantine only from this app; it does not disable Gatekeeper for the Mac. The recipient can then open the app normally. A new download may require the same step. Previously downloaded models and saved credentials remain in the user's application data. Employer-managed Macs may enforce policies that prevent this approach.
 
 The pinned first-use manifest can be regenerated after changing Python dependencies:
 
@@ -113,8 +125,9 @@ uv run --extra dev pytest tests -q
 python3 scripts/check_secrets.py
 cd desktop
 npm test
+npm run test:packaging
 npm run build
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-Tests cover legacy transcript import, source safety, speaker assignment, confidence propagation, cache readiness, view persistence, pause thresholds and placement, untimed words, and matching Word/TXT content and formatting. Word output is additionally rendered for visual review. The upstream example transcripts remain importable.
+Tests cover legacy transcript import, source safety, speaker assignment, confidence propagation, cache readiness, view persistence, pause thresholds and placement, untimed words, and matching Word/TXT content and formatting. macOS packaging checks deliberately invalidate a real helper binary, repair it, verify extracted ZIP signatures and launch its executable, and ensure that changes after signing are rejected. Word output is additionally rendered for visual review. The upstream example transcripts remain importable.

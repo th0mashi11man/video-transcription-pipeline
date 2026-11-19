@@ -1,12 +1,13 @@
 {
   "name": "transcript-studio",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
     "test": "vitest run",
+    "test:packaging": "node --test scripts/package-macos.check.mjs",
     "build:private": "node scripts/build-private.mjs",
     "check:secrets": "python3 ../scripts/check_secrets.py",
     "tauri": "tauri",

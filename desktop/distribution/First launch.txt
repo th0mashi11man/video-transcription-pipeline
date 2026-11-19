@@ -1,0 +1,27 @@
+Transcript Studio — first launch
+
+Requires an Apple Silicon Mac (M1 or newer) running macOS 14 or later.
+
+1. Quit any earlier copy of Transcript Studio.
+2. Move Transcript Studio.app from this folder into Applications.
+   Replace the earlier version if asked.
+3. Open Terminal (in Applications > Utilities) and paste this command:
+
+   xattr -dr com.apple.quarantine "/Applications/Transcript Studio.app"
+
+4. Press Return, then open Transcript Studio from Applications.
+
+This private build is not notarized by Apple. The command removes the downloaded
+app's quarantine attribute so you can choose to run it. It applies only to
+Transcript Studio; it does not turn off macOS security checks for other apps.
+Use it only for a copy received from the person sharing this app with you.
+
+Repeat the command after replacing the app with a newly downloaded version if
+macOS blocks that version. Keep the app in Applications when using this command.
+
+On first transcription, the app downloads its local engine and the chosen model.
+Leave it open while the download indicator is shown. Later uses reuse those files.
+Replacing the app preserves previously downloaded models and saved credentials.
+
+If the app is still blocked, send the person who shared it the exact message and
+your macOS version. Macs managed by an employer may restrict this opening method.
